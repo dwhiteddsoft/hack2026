@@ -138,6 +138,15 @@ Combining appearance and motion:
 - **Spatial + Temporal** streams
 - Custom dual-input architectures
 
+### Object Detection Models
+For object detection and localization:
+- **YOLOv2** (4D tensor format) ✅ Fully supported
+- **YOLOv3** standard (3D tensor format) ✅ Fully supported
+- **YOLOv3-10.onnx** ⚠️ Requires dual inputs - unsupported due to complexity
+- **YOLOv5/v8** ONNX exports ✅ Recommended for best compatibility
+
+> **Note**: Some YOLOv3 models (like yolov3-10.onnx) require additional `image_shape` inputs which create complex lifetime management issues in Rust. For object detection, we recommend using standard YOLOv3 models from Ultralytics or YOLOv2/YOLOv5/v8 models.
+
 ## Builder Pattern Examples
 
 ### Easy Configuration with Presets

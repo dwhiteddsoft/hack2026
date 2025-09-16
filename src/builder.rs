@@ -65,6 +65,33 @@ impl ClassifierBuilder {
         self
     }
     
+    /// Configure for object detection with custom thresholds
+    pub fn object_detection(mut self, num_classes: usize, confidence_threshold: f32, nms_threshold: f32) -> Self {
+        self.model_type = Some(ModelType::ObjectDetection {
+            num_classes,
+            confidence_threshold,
+            nms_threshold,
+        });
+        self
+    }
+    
+    /// Configure for object detection with default thresholds
+    /// Uses num_classes = 80 (COCO), confidence_threshold = 0.5, nms_threshold = 0.45
+    pub fn object_detection_default(self) -> Self {
+        self.object_detection(80, 0.5, 0.45)
+    }
+    
+    /// Configure for YOLO object detection
+    /// Uses optimized thresholds for YOLO models (COCO dataset: 80 classes)
+    pub fn yolo_detection(self) -> Self {
+        self.object_detection(80, 0.25, 0.45)
+    }
+    
+    /// Configure for strict object detection (higher confidence threshold)
+    pub fn strict_object_detection(self) -> Self {
+        self.object_detection(80, 0.95, 0.3)
+    }
+    
     /// Set input image size
     pub fn input_size(mut self, width: u32, height: u32) -> Self {
         self.input_size = Some((width, height));

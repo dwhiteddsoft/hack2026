@@ -8,6 +8,9 @@ pub enum ClassificationError {
     #[error("ONNX runtime error: {0}")]
     OnnxError(String),
     
+    #[error("Model inference error: {0}")]
+    ModelInferenceError(String),
+    
     #[error("Image processing error: {0}")]
     ImageProcessingError(String),
     

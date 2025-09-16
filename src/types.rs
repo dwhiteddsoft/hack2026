@@ -49,7 +49,7 @@ impl ClassificationResult {
 }
 
 /// Types of models supported by the classifier
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ModelType {
     /// Single frame image classification
     SingleFrame,
@@ -65,6 +65,16 @@ pub enum ModelType {
     
     /// Two-stream models (RGB + Optical Flow)
     TwoStream,
+    
+    /// Object detection models that output bounding boxes
+    ObjectDetection {
+        /// Number of classes the model can detect
+        num_classes: usize,
+        /// Minimum confidence threshold for detections
+        confidence_threshold: f32,
+        /// Non-maximum suppression threshold
+        nms_threshold: f32,
+    },
 }
 
 impl ModelType {
@@ -76,12 +86,18 @@ impl ModelType {
             ModelType::LSTM { sequence_length } => Some(*sequence_length),
             ModelType::TwoStream => Some(2),
             ModelType::Variable { min_frames, .. } => Some(*min_frames),
+            ModelType::ObjectDetection { .. } => Some(1),
         }
     }
     
     /// Check if this model type supports streaming
     pub fn supports_streaming(&self) -> bool {
-        !matches!(self, ModelType::SingleFrame)
+        !matches!(self, ModelType::SingleFrame | ModelType::ObjectDetection { .. })
+    }
+    
+    /// Check if this model type outputs bounding boxes
+    pub fn outputs_bounding_boxes(&self) -> bool {
+        matches!(self, ModelType::ObjectDetection { .. })
     }
 }
 
@@ -203,5 +219,166 @@ impl Default for PreprocessingConfig {
             center_crop: false,
             normalize: true,
         }
+    }
+}
+
+/// Result of an object detection operation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DetectionResult {
+    /// List of detected objects
+    pub detections: Vec<Detection>,
+    
+    /// Total processing time in milliseconds
+    pub processing_time_ms: Option<u64>,
+    
+    /// Image dimensions used for detection
+    pub image_width: u32,
+    pub image_height: u32,
+    
+    /// Optional metadata
+    pub metadata: Option<serde_json::Value>,
+}
+
+impl DetectionResult {
+    /// Get detections above a confidence threshold
+    pub fn filter_by_confidence(&self, min_confidence: f32) -> Vec<&Detection> {
+        self.detections
+            .iter()
+            .filter(|d| d.confidence >= min_confidence)
+            .collect()
+    }
+    
+    /// Get detections for specific class IDs
+    pub fn filter_by_classes(&self, class_ids: &[usize]) -> Vec<&Detection> {
+        self.detections
+            .iter()
+            .filter(|d| class_ids.contains(&d.class_id))
+            .collect()
+    }
+    
+    /// Get the N most confident detections
+    pub fn top_n_detections(&self, n: usize) -> Vec<&Detection> {
+        let mut sorted: Vec<&Detection> = self.detections.iter().collect();
+        sorted.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+        sorted.into_iter().take(n).collect()
+    }
+}
+
+/// A single object detection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Detection {
+    /// Bounding box coordinates
+    pub bbox: BoundingBox,
+    
+    /// Confidence score (0.0 to 1.0)
+    pub confidence: f32,
+    
+    /// Predicted class ID
+    pub class_id: usize,
+    
+    /// Human-readable class name (if available)
+    pub class_name: Option<String>,
+    
+    /// Optional tracking ID for video sequences
+    pub track_id: Option<u32>,
+}
+
+impl Detection {
+    /// Calculate the area of the bounding box
+    pub fn area(&self) -> f32 {
+        self.bbox.area()
+    }
+    
+    /// Calculate Intersection over Union (IoU) with another detection
+    pub fn iou(&self, other: &Detection) -> f32 {
+        self.bbox.iou(&other.bbox)
+    }
+}
+
+/// Bounding box coordinates
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BoundingBox {
+    /// Left x coordinate
+    pub x1: f32,
+    
+    /// Top y coordinate  
+    pub y1: f32,
+    
+    /// Right x coordinate
+    pub x2: f32,
+    
+    /// Bottom y coordinate
+    pub y2: f32,
+}
+
+impl BoundingBox {
+    /// Create a new bounding box
+    pub fn new(x1: f32, y1: f32, x2: f32, y2: f32) -> Self {
+        Self { x1, y1, x2, y2 }
+    }
+    
+    /// Calculate the area of the bounding box
+    pub fn area(&self) -> f32 {
+        (self.x2 - self.x1).max(0.0) * (self.y2 - self.y1).max(0.0)
+    }
+    
+    /// Calculate the center point
+    pub fn center(&self) -> (f32, f32) {
+        ((self.x1 + self.x2) / 2.0, (self.y1 + self.y2) / 2.0)
+    }
+    
+    /// Calculate width and height
+    pub fn width_height(&self) -> (f32, f32) {
+        (self.x2 - self.x1, self.y2 - self.y1)
+    }
+    
+    /// Calculate Intersection over Union (IoU) with another bounding box
+    pub fn iou(&self, other: &BoundingBox) -> f32 {
+        let intersection = self.intersection(other);
+        if intersection.area() == 0.0 {
+            return 0.0;
+        }
+        
+        let union_area = self.area() + other.area() - intersection.area();
+        if union_area == 0.0 {
+            return 0.0;
+        }
+        
+        intersection.area() / union_area
+    }
+    
+    /// Calculate intersection with another bounding box
+    pub fn intersection(&self, other: &BoundingBox) -> BoundingBox {
+        let x1 = self.x1.max(other.x1);
+        let y1 = self.y1.max(other.y1);
+        let x2 = self.x2.min(other.x2);
+        let y2 = self.y2.min(other.y2);
+        
+        if x1 >= x2 || y1 >= y2 {
+            // No intersection
+            BoundingBox::new(0.0, 0.0, 0.0, 0.0)
+        } else {
+            BoundingBox::new(x1, y1, x2, y2)
+        }
+    }
+    
+    /// Scale bounding box coordinates to image dimensions
+    pub fn scale_to_image(&self, image_width: u32, image_height: u32) -> BoundingBox {
+        BoundingBox::new(
+            self.x1 * image_width as f32,
+            self.y1 * image_height as f32,
+            self.x2 * image_width as f32,
+            self.y2 * image_height as f32,
+        )
+    }
+    
+    /// Normalize bounding box coordinates (0.0 to 1.0)
+    pub fn normalize(&self, image_width: u32, image_height: u32) -> BoundingBox {
+        BoundingBox::new(
+            self.x1 / image_width as f32,
+            self.y1 / image_height as f32,
+            self.x2 / image_width as f32,
+            self.y2 / image_height as f32,
+        )
     }
 }

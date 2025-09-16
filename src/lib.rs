@@ -1,20 +1,23 @@
 //! # ONNX Vision Classifier
 //!
-//! A Rust library for ONNX-based image and video classification that supports
-//! both single-frame and multi-frame models.
+//! A Rust library for ONNX-based image and video classification and object detection
+//! that supports both single-frame and multi-frame models.
 //!
 //! ## Features
 //!
 //! - Single-frame image classification (ResNet, EfficientNet, etc.)
 //! - Multi-frame video classification (I3D, SlowFast, etc.)
+//! - Object detection with bounding boxes (YOLO, SSD, Faster R-CNN, etc.)
 //! - LSTM-based sequence classification
 //! - Two-stream models (RGB + Optical Flow)
 //! - Streaming frame processing with automatic buffering
+//! - Non-Maximum Suppression (NMS) for object detection
 //! - Flexible preprocessing pipeline
 //! - Builder pattern for easy configuration
 //!
 //! ## Quick Start
 //!
+//! ### Image Classification
 //! ```rust,no_run
 //! use onnx_vision_classifier::{classifier, RgbImage};
 //!
@@ -35,6 +38,32 @@
 //! # Ok(())
 //! # }
 //! ```
+//!
+//! ### Object Detection
+//! ```rust,no_run
+//! use onnx_vision_classifier::{ClassifierBuilder, Result};
+//!
+//! # fn main() -> Result<()> {
+//! // Object detection with YOLOv8
+//! let detector = ClassifierBuilder::new()
+//!     .model_path("models/yolov8n.onnx")
+//!     .yolo_detection()  // Uses confidence=0.25, nms=0.45, classes=80
+//!     .input_size(640, 640)
+//!     .imagenet_normalization()
+//!     .build()?;
+//!
+//! let image = image::open("test.jpg")?.to_rgb8();
+//! let result = detector.detect_objects(&image)?;
+//! for detection in &result.detections {
+//!     println!("Found object {}: {:.2}% at [{:.0}, {:.0}, {:.0}, {:.0}]",
+//!         detection.class_name.as_deref().unwrap_or("Unknown"),
+//!         detection.confidence * 100.0,
+//!         detection.bbox.x1, detection.bbox.y1,
+//!         detection.bbox.x2, detection.bbox.y2);
+//! }
+//! # Ok(())
+//! # }
+//! ```
 
 mod error;
 mod types;
@@ -42,9 +71,13 @@ mod buffer;
 mod preprocessing;
 mod classifier;
 mod builder;
+mod detection;
 
 pub use error::{ClassificationError, Result};
-pub use types::{ClassificationResult, ModelType, ModelConfig, ImageNormalization};
+pub use types::{
+    ClassificationResult, DetectionResult, Detection, BoundingBox,
+    ModelType, ModelConfig, ImageNormalization
+};
 pub use classifier::VisionClassifier;
 pub use builder::ClassifierBuilder;
 pub use preprocessing::{ImagePreprocessor, DefaultPreprocessor};
