@@ -86,6 +86,13 @@ impl VisionClassifier {
         }
     }
     
+    /// Classify a single frame and return result as JSON string
+    pub fn classify_single_json(&self, frame: &RgbImage) -> Result<String> {
+        let result = self.classify_single(frame)?;
+        serde_json::to_string(&result)
+            .map_err(ClassificationError::SerializationError)
+    }
+    
     /// Classify multiple frames
     pub fn classify_frames(&self, frames: &[RgbImage]) -> Result<ClassificationResult> {
         let frame_refs: Vec<&RgbImage> = frames.iter().collect();
@@ -496,5 +503,31 @@ mod tests {
         }
         
         Ok(())
+    }
+
+    #[test]
+    fn test_classification_result_json() {
+        use crate::types::ClassificationResult;
+        
+        // Create a mock classification result
+        let result = ClassificationResult {
+            class_id: 487,
+            class_name: Some("castle".to_string()),
+            confidence: 0.8754,
+            all_scores: vec![0.1, 0.2, 0.8754, 0.3],
+            metadata: None,
+        };
+        
+        // Test JSON serialization
+        let json_str = serde_json::to_string(&result).unwrap();
+        assert!(json_str.contains("\"class_id\":487"));
+        assert!(json_str.contains("\"class_name\":\"castle\""));
+        assert!(json_str.contains("\"confidence\":0.8754"));
+        
+        // Test deserialization
+        let deserialized: ClassificationResult = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(deserialized.class_id, 487);
+        assert_eq!(deserialized.class_name, Some("castle".to_string()));
+        assert_eq!(deserialized.confidence, 0.8754);
     }
 }

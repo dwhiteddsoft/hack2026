@@ -19,8 +19,8 @@ fn main() -> Result<()> {
     // 3. Provide matching class names
     // 4. Ensure input image dimensions match model requirements
     
-    let model_path = "resnet50.onnx"; // Replace with actual model path
-    //let model_path = "mobilenetv2-7.onnx"; // Replace with actual model path
+    //let model_path = "resnet50.onnx"; // Replace with actual model path
+    let model_path = "mobilenetv2-7.onnx"; // Replace with actual model path
     
     // Check if model exists
     if !Path::new(model_path).exists() {
@@ -77,7 +77,7 @@ fn main() -> Result<()> {
         if let Some(ref class_name) = result.class_name {
             println!("  Class: {}", class_name);
         }
-        println!("  Confidence: {:.2}%", result.confidence * 100.0);
+        println!("  Confidence: {:.2}%", result.confidence);
         
         // Show top 3 predictions
         let top_3 = result.top_n(3);
@@ -85,6 +85,12 @@ fn main() -> Result<()> {
         for (i, (class_id, score)) in top_3.iter().enumerate() {
             println!("    {}. Class {}: {:.2}%", i + 1, class_id, score * 100.0);
         }
+        
+        // Example: Get result as JSON
+        println!("\n📄 JSON Output:");
+        let json_result = classifier.classify_single_json(&img)?;
+        println!("{}", json_result);
+        
     } else {
         println!("\n📸 No test image found. Creating synthetic image...");
         
@@ -102,6 +108,11 @@ fn main() -> Result<()> {
             println!("  Class: {}", class_name);
         }
         println!("  Confidence: {:.2}%", result.confidence * 100.0);
+        
+        // Example: Get synthetic result as JSON
+        println!("\n📄 JSON Output (Synthetic):");
+        let json_result = classifier.classify_single_json(&test_img)?;
+        println!("{}", json_result);
     }
     
     println!("\n🎉 Real ONNX model integration successful!");
