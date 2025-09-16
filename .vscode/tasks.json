@@ -9,12 +9,13 @@
       "label": "rust: cargo build --example",
       "problemMatcher": ["$rustc"]
     },
+
     {
       "type": "cargo",
       "command": "build",
-      "args": ["--lib"],
+      "args": ["--example", "object_detection_example"],
       "group": "build",
-      "label": "rust: cargo build lib",
+      "label": "rust: cargo build --example object_detection_example",
       "problemMatcher": ["$rustc"]
     },
     {
