@@ -6,6 +6,12 @@ description = "A Rust library for ONNX-based image and video classification"
 license = "MIT OR Apache-2.0"
 keywords = ["onnx", "computer-vision", "machine-learning", "classification"]
 
+[profile.dev]
+debug = true
+
+[profile.release]
+debug = true
+
 [dependencies]
 ort = "1.15"
 image = "0.24"
