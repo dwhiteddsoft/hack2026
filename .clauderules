@@ -1,0 +1,109 @@
+# Claude Rules for MyRustCrate
+
+## Project Context
+This is a high-performance Rust library for data processing and analysis. The crate focuses on zero-copy operations, memory safety, and ergonomic APIs for developers working with large datasets.
+
+## Core Development Principles
+
+### Code Quality Standards
+- **Memory Safety First**: Never use `unsafe` without extensive documentation and safety proofs
+- **Zero-Copy Operations**: Prioritize borrowing over cloning, use `Cow<T>` when ownership is conditional
+- **Comprehensive Error Handling**: All fallible operations must return `Result<T, E>`, never use `unwrap()` or `expect()` in library code
+- **API Ergonomics**: Design APIs that are hard to misuse and provide clear error messages
+
+### Rust-Specific Requirements
+- Use `thiserror` for error types, `anyhow` only in applications
+- Implement appropriate traits: `Debug`, `Clone`, `Send`, `Sync` where applicable
+- Follow Rust naming conventions: `snake_case` for functions/variables, `PascalCase` for types
+- Include `#![warn(missing_docs)]` and document all public APIs
+- Use `cargo clippy` recommendations and fix all warnings
+
+## AI Interaction Guidelines
+
+### When Writing Code
+1. **Always explain ownership decisions** - Why did you choose `&str` vs `String`?
+2. **Provide multiple approaches** - Show both imperative and functional styles when appropriate
+3. **Include comprehensive tests** - Unit tests, integration tests, and property-based tests with `proptest`
+4. **Document with examples** - Every public function needs a usage example in doc comments
+
+### Code Review Process
+When I paste code for review, analyze for:
+- Idiomatic Rust patterns and suggest improvements
+- Performance implications and optimization opportunities
+- Error handling completeness and user experience
+- API design and potential breaking changes
+- Thread safety and `Send`/`Sync` bounds
+
+### Response Format Preferences
+- **Be specific**: Instead of "this could be optimized," explain exactly what optimization and why
+- **Show alternatives**: "Here are 3 ways to implement this, each with different trade-offs..."
+- **Explain trade-offs**: Performance vs readability, memory vs speed, etc.
+- **Include benchmarks**: When discussing performance, provide simple benchmark examples
+
+## Project-Specific Rules
+
+### Architecture Patterns
+- Use the newtype pattern for type safety
+- Prefer composition over inheritance-like patterns
+- Design for testability - avoid global state
+- Use builder pattern for complex configuration
+
+### Performance Requirements
+- Target zero-allocation hot paths
+- Use `#[inline]` judiciously on small, frequently called functions
+- Profile with `cargo bench` before optimizing
+- Document time complexity in function docs
+
+### Testing Standards
+- Achieve >90% code coverage
+- Test error conditions, not just happy paths
+- Use `proptest` for testing invariants
+- Include integration tests that use the public API only
+
+## Communication Style
+- Be direct and technical - I want detailed explanations
+- Challenge my assumptions if you see potential issues
+- Ask clarifying questions when requirements are ambiguous
+- Suggest related improvements beyond the immediate request
+
+## Code Generation Templates
+When creating new modules, include:
+```rust
+//! Brief module description
+//!
+//! Longer explanation with examples if needed
+
+use std::...;
+use crate::...;
+
+/// Public struct/enum/function documentation
+/// 
+/// # Examples
+/// 
+/// ```rust
+/// // Working example here
+/// ```
+/// 
+/// # Errors
+/// 
+/// Returns `Error::...` when...
+```
+
+## Security Considerations
+- Validate all inputs at API boundaries
+- Use constant-time operations for cryptographic comparisons
+- Document any security-sensitive code paths
+- Consider DoS vectors in public APIs (infinite loops, excessive memory usage)
+
+## Forbidden Patterns
+- Direct use of `unwrap()`, `expect()` in library code
+- `panic!()` in library code (use `Result` instead)
+- Mutable global state
+- Blocking I/O in async contexts
+- `unsafe` without detailed safety documentation
+
+## Current Focus Areas
+- Implementing parallel processing with `rayon`
+- Optimizing memory layout for cache efficiency  
+- Designing zero-cost abstractions for data transformation
+- Building comprehensive benchmarking suite

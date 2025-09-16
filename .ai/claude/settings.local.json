@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__MSDocs__microsoft_docs_search",
+      "Read(//Users/davidwhite/src/spartan/**)",
+      "Bash(flutter pub:*)",
+      "Bash(flutter analyze:*)",
+      "Bash(flutter build:*)",
+      "Bash(flutter clean:*)",
+      "Bash(./gradlew:*)",
+      "mcp__MSDocs__microsoft_docs_fetch",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:github.com)",
+      "WebSearch"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
