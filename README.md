@@ -335,6 +335,8 @@ Download a pre-trained model and test it:
 ```bash
 # Download ResNet-50 from ONNX Model Zoo
 curl -L -o resnet50.onnx 'https://github.com/onnx/models/raw/main/vision/classification/resnet/model/resnet50-v1-7.onnx'
+# Download Mobilenet-v2 from ONNX Model Zoo
+curl -L -o mobilenetv2-7.onnx 'https://github.com/onnx/models/raw/refs/heads/main/validated/vision/classification/mobilenet/model/mobilenetv2-7.onnx'
 
 # Run the real model example
 cargo run --example real_model_example

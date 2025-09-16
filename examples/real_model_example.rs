@@ -19,8 +19,8 @@ fn main() -> Result<()> {
     // 3. Provide matching class names
     // 4. Ensure input image dimensions match model requirements
     
-    //let model_path = "resnet50.onnx"; // Replace with actual model path
-    let model_path = "mobilenetv2-7.onnx"; // Replace with actual model path
+    let model_path = "resnet50.onnx"; // Replace with actual model path
+    //let model_path = "mobilenetv2-7.onnx"; // Replace with actual model path
     
     // Check if model exists
     if !Path::new(model_path).exists() {
