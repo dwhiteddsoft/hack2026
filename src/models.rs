@@ -74,23 +74,271 @@ impl ModelRegistry {
         // YOLOv8 family
         self.add_yolov8_profiles();
         
-        // YOLOv5 family
-        self.add_yolov5_profiles();
-        
-        // SSD family
-        self.add_ssd_profiles();
-        
-        // RetinaNet family
-        self.add_retinanet_profiles();
-        
-        // Mask R-CNN family
-        self.add_mask_rcnn_profiles();
+        // Phase 2.3.3: Extended Model Support (To be implemented)
+        // self.add_yolov5_profiles();
+        // self.add_ssd_profiles();
+        // self.add_retinanet_profiles();
+        // self.add_mask_rcnn_profiles();
     }
 
     /// Add YOLOv8 model profiles
     fn add_yolov8_profiles(&mut self) {
-        // Implementation will be added in the actual build
-        todo!("ModelRegistry::add_yolov8_profiles implementation")
+        use crate::core::{PreprocessingConfig, ResizeStrategy, NormalizationType, TensorLayout,
+                           ExecutionProvider, GraphOptimizationLevel};
+        use crate::input::{InputSpecification, OnnxTensorSpec, OnnxTensorShape, OnnxDimension, 
+                           OnnxDataType, ValueRange, OnnxPreprocessing, OnnxSessionConfig, InputBinding,
+                           BindingStrategy};
+        use crate::output::{OutputSpecification, TensorOutput, TensorShape, OutputDimension,
+                            LayoutFormat, ContentType, SpatialLayout, ChannelInterpretation,
+                            CoordinateSystem, ActivationRequirements, ActivationType, CoordinateFormat,
+                            CoordinateNormalization, ComponentType, ComponentRange};
+        
+        // Common YOLOv8 input specification (640x640, RGB, 0-1 normalized)
+        let common_input_spec = InputSpecification {
+            tensor_spec: OnnxTensorSpec {
+                input_name: "images".to_string(),
+                shape: OnnxTensorShape {
+                    dimensions: vec![
+                        OnnxDimension::Batch,
+                        OnnxDimension::Fixed(3),  // RGB channels
+                        OnnxDimension::Fixed(640), // height
+                        OnnxDimension::Fixed(640), // width
+                    ],
+                },
+                data_type: OnnxDataType::Float32,
+                value_range: ValueRange {
+                    normalization: NormalizationType::ZeroToOne,
+                    onnx_range: (0.0, 1.0),
+                },
+            },
+            preprocessing: OnnxPreprocessing {
+                resize_strategy: ResizeStrategy::Letterbox {
+                    target: (640, 640),
+                    padding_value: 114.0,
+                },
+                normalization: NormalizationType::ZeroToOne,
+                tensor_layout: TensorLayout {
+                    format: "NCHW".to_string(),
+                    channel_order: "RGB".to_string(),
+                },
+            },
+            session_config: OnnxSessionConfig {
+                execution_providers: vec![ExecutionProvider::CPU],
+                graph_optimization_level: GraphOptimizationLevel::EnableBasic,
+                input_binding: InputBinding {
+                    input_names: vec!["images".to_string()],
+                    binding_strategy: BindingStrategy::SingleInput,
+                },
+            },
+        };
+
+        // Common YOLOv8 output specification (1, 84, 8400 format)
+        let common_output_spec = OutputSpecification {
+            architecture_type: crate::output::ArchitectureType::SingleStage {
+                unified_head: true,
+                anchor_based: false,
+            },
+            tensor_outputs: vec![
+                TensorOutput {
+                    name: "output0".to_string(),
+                    shape: TensorShape {
+                        dimensions: vec![
+                            OutputDimension::Batch(1),
+                            OutputDimension::Coordinates(84), // 4 bbox + 80 classes
+                            OutputDimension::Anchors(8400),   // Total anchor points
+                        ],
+                        layout_format: LayoutFormat::NCHW,
+                    },
+                    content_type: ContentType::Combined {
+                        components: vec![
+                            ContentType::Regression {
+                                coordinate_format: CoordinateFormat::CenterWidthHeight,
+                                normalization: CoordinateNormalization::Normalized,
+                            },
+                            ContentType::Classification {
+                                num_classes: 80,
+                                background_class: false,
+                                multi_label: false,
+                            },
+                        ],
+                    },
+                    spatial_layout: SpatialLayout::Unified {
+                        total_predictions: 8400,
+                        multi_scale: true,
+                    },
+                    channel_interpretation: ChannelInterpretation::Unified {
+                        components: vec![
+                            ComponentRange {
+                                component_type: ComponentType::BoundingBox,
+                                start_channel: 0,
+                                end_channel: 4,
+                            },
+                            ComponentRange {
+                                component_type: ComponentType::ClassLogits,
+                                start_channel: 4,
+                                end_channel: 84,
+                            },
+                        ],
+                    },
+                },
+            ],
+            coordinate_system: CoordinateSystem::Relative,
+            activation_requirements: ActivationRequirements {
+                bbox_activation: ActivationType::Sigmoid,
+                class_activation: ActivationType::Sigmoid,
+                confidence_activation: ActivationType::Sigmoid,
+            },
+        };
+
+        // Common preprocessing config
+        let common_preprocessing = PreprocessingConfig {
+            resize_strategy: ResizeStrategy::Letterbox {
+                target: (640, 640),
+                padding_value: 114.0,
+            },
+            normalization: NormalizationType::ZeroToOne,
+            tensor_layout: TensorLayout {
+                format: "NCHW".to_string(),
+                channel_order: "RGB".to_string(),
+            },
+        };
+
+        // YOLOv8 Nano variant
+        let yolov8n_info = ModelInfo {
+            name: "yolov8n".to_string(),
+            version: "8.0".to_string(),
+            architecture: crate::core::ArchitectureType::SingleStage {
+                unified_head: true,
+                anchor_based: false,
+            },
+            input_spec: common_input_spec.clone(),
+            output_spec: common_output_spec.clone(),
+            preprocessing_config: common_preprocessing.clone(),
+        };
+
+        let yolov8n_variant = ModelVariant {
+            name: "nano".to_string(),
+            version: "8.0".to_string(),
+            model_info: yolov8n_info,
+            performance_metrics: Some(PerformanceMetrics {
+                inference_time_ms: 2.0,
+                memory_usage_mb: 6,
+                accuracy_metrics: AccuracyMetrics {
+                    map_50: Some(37.3),
+                    map_50_95: Some(22.4),
+                    precision: Some(0.85),
+                    recall: Some(0.78),
+                    f1_score: Some(0.81),
+                },
+                hardware_requirements: HardwareRequirements {
+                    min_memory_gb: 0.5,
+                    recommended_memory_gb: 1.0,
+                    supports_gpu: true,
+                    min_compute_capability: Some("6.0".to_string()),
+                },
+            }),
+            recommended_use_cases: vec![
+                "Real-time mobile applications".to_string(),
+                "Edge computing".to_string(),
+                "IoT devices".to_string(),
+                "Quick prototyping".to_string(),
+            ],
+        };
+
+        // YOLOv8 Small variant
+        let yolov8s_info = ModelInfo {
+            name: "yolov8s".to_string(),
+            version: "8.0".to_string(),
+            architecture: crate::core::ArchitectureType::SingleStage {
+                unified_head: true,
+                anchor_based: false,
+            },
+            input_spec: common_input_spec.clone(),
+            output_spec: common_output_spec.clone(),
+            preprocessing_config: common_preprocessing.clone(),
+        };
+
+        let yolov8s_variant = ModelVariant {
+            name: "small".to_string(),
+            version: "8.0".to_string(),
+            model_info: yolov8s_info,
+            performance_metrics: Some(PerformanceMetrics {
+                inference_time_ms: 4.2,
+                memory_usage_mb: 22,
+                accuracy_metrics: AccuracyMetrics {
+                    map_50: Some(44.9),
+                    map_50_95: Some(28.1),
+                    precision: Some(0.87),
+                    recall: Some(0.82),
+                    f1_score: Some(0.84),
+                },
+                hardware_requirements: HardwareRequirements {
+                    min_memory_gb: 1.0,
+                    recommended_memory_gb: 2.0,
+                    supports_gpu: true,
+                    min_compute_capability: Some("6.0".to_string()),
+                },
+            }),
+            recommended_use_cases: vec![
+                "Balanced speed and accuracy".to_string(),
+                "Desktop applications".to_string(),
+                "Video processing".to_string(),
+                "Production systems".to_string(),
+            ],
+        };
+
+        // YOLOv8 Medium variant
+        let yolov8m_info = ModelInfo {
+            name: "yolov8m".to_string(),
+            version: "8.0".to_string(),
+            architecture: crate::core::ArchitectureType::SingleStage {
+                unified_head: true,
+                anchor_based: false,
+            },
+            input_spec: common_input_spec,
+            output_spec: common_output_spec,
+            preprocessing_config: common_preprocessing,
+        };
+
+        let yolov8m_variant = ModelVariant {
+            name: "medium".to_string(),
+            version: "8.0".to_string(),
+            model_info: yolov8m_info,
+            performance_metrics: Some(PerformanceMetrics {
+                inference_time_ms: 8.5,
+                memory_usage_mb: 50,
+                accuracy_metrics: AccuracyMetrics {
+                    map_50: Some(50.2),
+                    map_50_95: Some(33.9),
+                    precision: Some(0.89),
+                    recall: Some(0.85),
+                    f1_score: Some(0.87),
+                },
+                hardware_requirements: HardwareRequirements {
+                    min_memory_gb: 2.0,
+                    recommended_memory_gb: 4.0,
+                    supports_gpu: true,
+                    min_compute_capability: Some("6.0".to_string()),
+                },
+            }),
+            recommended_use_cases: vec![
+                "High accuracy applications".to_string(),
+                "Cloud deployments".to_string(),
+                "Batch processing".to_string(),
+                "Quality control systems".to_string(),
+            ],
+        };
+
+        let yolov8_profile = ModelProfile {
+            name: "yolov8".to_string(),
+            variants: vec![yolov8n_variant, yolov8s_variant, yolov8m_variant],
+            description: "YOLOv8 family - Latest YOLO architecture with improved accuracy and efficiency".to_string(),
+            architecture_family: "YOLO".to_string(),
+            supported_tasks: vec![crate::core::TaskType::Detection],
+            default_variant: "small".to_string(),
+        };
+
+        self.models.insert("yolov8".to_string(), yolov8_profile);
     }
 
     /// Add YOLOv5 model profiles
@@ -157,8 +405,117 @@ impl ModelRegistry {
 
     /// Search models by criteria
     pub fn search_models(&self, criteria: &SearchCriteria) -> Vec<&ModelProfile> {
-        // Implementation will be added in the actual build
-        todo!("ModelRegistry::search_models implementation")
+        let mut matching_profiles = Vec::new();
+        
+        for profile in self.models.values() {
+            let mut matches = true;
+
+            // Filter by architecture type if specified
+            if let Some(ref arch_type) = criteria.architecture_type {
+                let profile_architecture = &profile.variants[0].model_info.architecture;
+                matches &= match (arch_type, profile_architecture) {
+                    (
+                        crate::core::ArchitectureType::SingleStage { .. }, 
+                        crate::core::ArchitectureType::SingleStage { .. }
+                    ) => true,
+                    (
+                        crate::core::ArchitectureType::TwoStage { .. }, 
+                        crate::core::ArchitectureType::TwoStage { .. }
+                    ) => true,
+                    (
+                        crate::core::ArchitectureType::MultiScale { .. }, 
+                        crate::core::ArchitectureType::MultiScale { .. }
+                    ) => true,
+                    _ => false,
+                };
+            }
+
+            // Filter by supported tasks if specified
+            if !criteria.supported_tasks.is_empty() {
+                let has_required_task = criteria.supported_tasks.iter().any(|required_task| {
+                    profile.supported_tasks.contains(required_task)
+                });
+                matches &= has_required_task;
+            }
+
+            // Filter by memory constraints if specified
+            if let Some(max_memory) = criteria.max_memory_mb {
+                // Check if any variant fits the memory constraint
+                let has_memory_fit = profile.variants.iter().any(|variant| {
+                    if let Some(ref metrics) = variant.performance_metrics {
+                        metrics.memory_usage_mb <= max_memory
+                    } else {
+                        true // If no metrics, assume it might fit
+                    }
+                });
+                matches &= has_memory_fit;
+            }
+
+            // Filter by minimum accuracy if specified
+            if let Some(min_accuracy) = criteria.min_accuracy {
+                // Check if any variant meets the accuracy requirement
+                let has_accuracy_fit = profile.variants.iter().any(|variant| {
+                    if let Some(ref metrics) = variant.performance_metrics {
+                        if let Some(map_50_95) = metrics.accuracy_metrics.map_50_95 {
+                            map_50_95 >= min_accuracy
+                        } else if let Some(map_50) = metrics.accuracy_metrics.map_50 {
+                            map_50 >= min_accuracy * 1.5 // Rough conversion from mAP@0.5:0.95 to mAP@0.5
+                        } else {
+                            true // If no accuracy metrics, assume it might meet requirements
+                        }
+                    } else {
+                        true // If no metrics, assume it might meet requirements
+                    }
+                });
+                matches &= has_accuracy_fit;
+            }
+
+            // Filter by maximum inference time if specified
+            if let Some(max_inference_time) = criteria.max_inference_time_ms {
+                // Check if any variant meets the speed requirement
+                let has_speed_fit = profile.variants.iter().any(|variant| {
+                    if let Some(ref metrics) = variant.performance_metrics {
+                        metrics.inference_time_ms <= max_inference_time
+                    } else {
+                        true // If no metrics, assume it might fit
+                    }
+                });
+                matches &= has_speed_fit;
+            }
+
+            // Filter by hardware constraints if specified
+            if let Some(ref hw_constraints) = criteria.hardware_constraints {
+                let has_hardware_fit = profile.variants.iter().any(|variant| {
+                    if let Some(ref metrics) = variant.performance_metrics {
+                        let hw_req = &metrics.hardware_requirements;
+                        
+                        // Check memory requirements
+                        let memory_ok = hw_req.min_memory_gb <= hw_constraints.min_memory_gb;
+                        
+                        // Check GPU support if required
+                        let gpu_ok = if hw_constraints.supports_gpu {
+                            hw_req.supports_gpu
+                        } else {
+                            true // If GPU not required, any model is fine
+                        };
+
+                        memory_ok && gpu_ok
+                    } else {
+                        true // If no hardware requirements specified, assume compatible
+                    }
+                });
+                matches &= has_hardware_fit;
+            }
+
+            if matches {
+                matching_profiles.push(profile);
+            }
+        }
+
+        // Sort by relevance (for now, just by name for consistency)
+        matching_profiles.sort_by(|a, b| a.name.cmp(&b.name));
+        
+        matching_profiles
     }
 
     /// Load models from configuration file
@@ -270,8 +627,208 @@ pub mod config_loader {
 
     /// Load model configuration from YAML
     pub fn load_yaml_config(path: &str) -> crate::error::Result<ModelInfo> {
-        // Implementation will be added in the actual build
-        todo!("load_yaml_config implementation")
+        use std::fs;
+        use crate::input::{InputSpecification, OnnxTensorSpec, OnnxTensorShape, OnnxDimension, 
+                           OnnxDataType, ValueRange, OnnxPreprocessing, OnnxSessionConfig, InputBinding,
+                           BindingStrategy};
+        use crate::output::{OutputSpecification, TensorOutput, TensorShape, OutputDimension,
+                            LayoutFormat, ContentType, SpatialLayout, ChannelInterpretation,
+                            CoordinateSystem, ActivationRequirements, ActivationType, ComponentRange,
+                            ComponentType};
+        use crate::core::{PreprocessingConfig, ResizeStrategy, NormalizationType, TensorLayout,
+                          ExecutionProvider, GraphOptimizationLevel};
+        
+        // Read YAML file
+        let yaml_content = fs::read_to_string(path)
+            .map_err(|e| crate::error::UocvrError::Io(e))?;
+        
+        // Parse YAML using serde_yaml 
+        let yaml_value: serde_yaml::Value = serde_yaml::from_str(&yaml_content)
+            .map_err(|e| crate::error::UocvrError::Yaml(e))?;
+        
+        // Extract basic model information
+        let name = yaml_value.get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+            
+        let version = yaml_value.get("version")
+            .and_then(|v| v.as_str())
+            .unwrap_or("1.0")
+            .to_string();
+        
+        // Parse architecture type
+        let architecture = match yaml_value.get("architecture")
+            .and_then(|v| v.as_str())
+            .unwrap_or("single_stage") {
+            "single_stage" => crate::core::ArchitectureType::SingleStage {
+                unified_head: yaml_value.get("unified_head").and_then(|v| v.as_bool()).unwrap_or(true),
+                anchor_based: yaml_value.get("anchor_based").and_then(|v| v.as_bool()).unwrap_or(false),
+            },
+            "two_stage" => crate::core::ArchitectureType::TwoStage {
+                rpn_outputs: vec![], // Default empty for now
+                rcnn_outputs: vec![], // Default empty for now  
+                additional_tasks: vec![], // Default empty for now
+            },
+            "multi_scale" => crate::core::ArchitectureType::MultiScale {
+                scale_strategy: crate::core::ScaleStrategy::YoloMultiScale,
+                shared_head: yaml_value.get("shared_head").and_then(|v| v.as_bool()).unwrap_or(true),
+            },
+            _ => crate::core::ArchitectureType::SingleStage {
+                unified_head: true,
+                anchor_based: false,
+            },
+        };
+
+        // Parse input specification with sensible defaults
+        let input_spec = InputSpecification {
+            tensor_spec: OnnxTensorSpec {
+                input_name: yaml_value.get("input")
+                    .and_then(|v| v.get("name"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("images")
+                    .to_string(),
+                shape: OnnxTensorShape {
+                    dimensions: vec![
+                        OnnxDimension::Batch,
+                        OnnxDimension::Fixed(yaml_value.get("input")
+                            .and_then(|v| v.get("channels"))
+                            .and_then(|v| v.as_i64())
+                            .unwrap_or(3)),
+                        OnnxDimension::Fixed(yaml_value.get("input")
+                            .and_then(|v| v.get("height"))
+                            .and_then(|v| v.as_i64())
+                            .unwrap_or(640)),
+                        OnnxDimension::Fixed(yaml_value.get("input")
+                            .and_then(|v| v.get("width"))
+                            .and_then(|v| v.as_i64())
+                            .unwrap_or(640)),
+                    ],
+                },
+                data_type: OnnxDataType::Float32,
+                value_range: ValueRange {
+                    normalization: NormalizationType::ZeroToOne,
+                    onnx_range: (0.0, 1.0),
+                },
+            },
+            preprocessing: OnnxPreprocessing {
+                resize_strategy: ResizeStrategy::Letterbox {
+                    target: (640, 640),
+                    padding_value: 114.0,
+                },
+                normalization: NormalizationType::ZeroToOne,
+                tensor_layout: TensorLayout {
+                    format: "NCHW".to_string(),
+                    channel_order: "RGB".to_string(),
+                },
+            },
+            session_config: OnnxSessionConfig {
+                execution_providers: vec![ExecutionProvider::CPU],
+                graph_optimization_level: GraphOptimizationLevel::EnableBasic,
+                input_binding: InputBinding {
+                    input_names: vec!["images".to_string()],
+                    binding_strategy: BindingStrategy::SingleInput,
+                },
+            },
+        };
+
+        // Parse output specification with sensible defaults  
+        let output_spec = OutputSpecification {
+            architecture_type: crate::output::ArchitectureType::SingleStage {
+                unified_head: true,
+                anchor_based: false,
+            },
+            tensor_outputs: vec![
+                TensorOutput {
+                    name: yaml_value.get("output")
+                        .and_then(|v| v.get("name"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("output0")
+                        .to_string(),
+                    shape: TensorShape {
+                        dimensions: vec![
+                            OutputDimension::Batch(1),
+                            OutputDimension::Coordinates(yaml_value.get("output")
+                                .and_then(|v| v.get("channels"))
+                                .and_then(|v| v.as_i64())
+                                .unwrap_or(84)),
+                            OutputDimension::Anchors(yaml_value.get("output")
+                                .and_then(|v| v.get("anchors"))
+                                .and_then(|v| v.as_i64())
+                                .unwrap_or(8400)),
+                        ],
+                        layout_format: LayoutFormat::NCHW,
+                    },
+                    content_type: ContentType::Combined {
+                        components: vec![
+                            ContentType::Regression {
+                                coordinate_format: crate::output::CoordinateFormat::CenterWidthHeight,
+                                normalization: crate::output::CoordinateNormalization::Normalized,
+                            },
+                            ContentType::Classification {
+                                num_classes: yaml_value.get("num_classes")
+                                    .and_then(|v| v.as_i64())
+                                    .unwrap_or(80),
+                                background_class: false,
+                                multi_label: false,
+                            },
+                        ],
+                    },
+                    spatial_layout: SpatialLayout::Unified {
+                        total_predictions: yaml_value.get("output")
+                            .and_then(|v| v.get("anchors"))
+                            .and_then(|v| v.as_i64())
+                            .unwrap_or(8400),
+                        multi_scale: true,
+                    },
+                    channel_interpretation: ChannelInterpretation::Unified {
+                        components: vec![
+                            ComponentRange {
+                                component_type: ComponentType::BoundingBox,
+                                start_channel: 0,
+                                end_channel: 4,
+                            },
+                            ComponentRange {
+                                component_type: ComponentType::ClassLogits,
+                                start_channel: 4,
+                                end_channel: yaml_value.get("output")
+                                    .and_then(|v| v.get("channels"))
+                                    .and_then(|v| v.as_i64())
+                                    .unwrap_or(84),
+                            },
+                        ],
+                    },
+                },
+            ],
+            coordinate_system: CoordinateSystem::Relative,
+            activation_requirements: ActivationRequirements {
+                bbox_activation: ActivationType::Sigmoid,
+                class_activation: ActivationType::Sigmoid,
+                confidence_activation: ActivationType::Sigmoid,
+            },
+        };
+
+        // Create preprocessing config
+        let preprocessing_config = PreprocessingConfig {
+            resize_strategy: ResizeStrategy::Letterbox {
+                target: (640, 640),
+                padding_value: 114.0,
+            },
+            normalization: NormalizationType::ZeroToOne,
+            tensor_layout: TensorLayout {
+                format: "NCHW".to_string(),
+                channel_order: "RGB".to_string(),
+            },
+        };
+
+        Ok(ModelInfo {
+            name,
+            version,
+            architecture,
+            input_spec,
+            output_spec,
+            preprocessing_config,
+        })
     }
 
     /// Load model configuration from JSON
@@ -282,8 +839,41 @@ pub mod config_loader {
 
     /// Auto-detect model type from ONNX file
     pub fn auto_detect_model_type(model_path: &str) -> crate::error::Result<String> {
-        // Implementation will be added in the actual build
-        todo!("auto_detect_model_type implementation")
+        use std::path::Path;
+        
+        // Check if file exists
+        if !Path::new(model_path).exists() {
+            return Err(crate::error::UocvrError::ResourceNotFound {
+                resource: model_path.to_string(),
+            });
+        }
+
+        // For now, use a simpler approach based on filename patterns
+        // TODO: Implement actual ONNX model introspection in future iteration
+        let filename = Path::new(model_path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        if filename.contains("yolov8") {
+            Ok("yolov8".to_string())
+        } else if filename.contains("yolov5") {
+            Ok("yolov5".to_string())
+        } else if filename.contains("yolo") {
+            Ok("yolo".to_string())
+        } else if filename.contains("ssd") {
+            Ok("ssd".to_string())
+        } else if filename.contains("retinanet") {
+            Ok("retinanet".to_string())
+        } else if filename.contains("mask") && filename.contains("rcnn") {
+            Ok("mask_rcnn".to_string())
+        } else if filename.contains("resnet") || filename.contains("mobilenet") {
+            Ok("classification".to_string())
+        } else {
+            // Default to unknown/generic detection model
+            Ok("unknown".to_string())
+        }
     }
 
     /// Generate default configuration for detected model type

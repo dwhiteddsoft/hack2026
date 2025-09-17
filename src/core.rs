@@ -41,7 +41,7 @@ pub enum ArchitectureType {
 }
 
 /// Task types supported by models
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TaskType {
     Detection,
     Segmentation,

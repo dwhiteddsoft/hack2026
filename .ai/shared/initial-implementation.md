@@ -217,24 +217,340 @@ impl OutputProcessor {
 
 ### Phase 2: Multi-Model Support (Weeks 5-8)
 
-#### 2.1 Model Registry Implementation
+#### 2.1 Input Processing Implementation
+
+**File**: `src/input.rs`
+
+**Status**: ✅ **COMPLETED** - All 16 todo!() placeholders successfully implemented with working functionality
+
+**Results Summary**:
+- ✅ **All 16 todo!() placeholders eliminated from `src/input.rs`**
+- ✅ **Complete input processing pipeline implemented** 
+- ✅ **Project compiles successfully with only warnings**
+- ✅ **Example runs successfully showing integration works**
+- ✅ **YOLOv8 Support**: Can process 640x640 RGB images with letterbox resize and 0-1 normalization
+- ✅ **Multi-Model Support**: Supports various resize strategies and normalization types
+- ✅ **Batch Processing**: Can handle multiple images efficiently
+- ✅ **Error Handling**: Comprehensive validation and error reporting
+
+**Implementation Plan**: Systematic replacement of all 16 `todo!()` placeholders with actual functionality, enabling real image preprocessing for ONNX computer vision models.
+
+**Phase 2.1.1: Core Image Processing Functions** (Priority: High)
+
+1. **`preprocessing::zero_to_one_normalize()`**
+   - Implementation: Divide all values by 255.0 to convert 0-255 → 0-1 range
+   - Dependencies: None
+   - Testing: Simple array with known values
+
+2. **`preprocessing::imagenet_normalize()`**  
+   - Implementation: Apply (pixel - mean) / std per channel
+   - Dependencies: None
+   - Testing: Known ImageNet values (mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+
+3. **`preprocessing::convert_channel_order()`**
+   - Implementation: Swap RGB ↔ BGR channel order using image crate
+   - Dependencies: None
+   - Testing: RGB → BGR → RGB round-trip verification
+
+**Phase 2.1.2: Resize Operations** (Priority: High)
+
+4. **`preprocessing::direct_resize()`**
+   - Implementation: Use `image::imageops::resize()` with Lanczos3 filter
+   - Dependencies: None  
+   - Testing: Known dimensions with specific resize filters
+
+5. **`preprocessing::letterbox_resize()`** ⭐ **CRITICAL**
+   - Implementation: 
+     - Calculate scale factor maintaining aspect ratio
+     - Resize to fit within target bounds
+     - Add padding with specified value to reach exact target size
+   - Dependencies: `direct_resize()`
+   - Testing: Various aspect ratios with padding verification
+
+6. **`preprocessing::shortest_edge_resize()`**
+   - Implementation: Scale shortest edge to target while respecting max_size
+   - Dependencies: None
+   - Testing: Portrait and landscape images with max size constraints
+
+**Phase 2.1.3: Image-to-Tensor Conversion** (Priority: High)
+
+7. **`InputProcessor::image_to_tensor()`** ⭐ **CRITICAL**
+   - Implementation:
+     - Convert DynamicImage to RGB8 format
+     - Extract pixel data as u8 array
+     - Convert to f32 and reshape to [1, C, H, W] ndarray
+     - Apply normalization based on configuration
+   - Dependencies: normalization functions
+   - Testing: Known image → expected tensor shape and values
+
+8. **`InputProcessor::apply_normalization()`**
+   - Implementation: Dispatch to appropriate normalization function based on config
+   - Dependencies: `zero_to_one_normalize()`, `imagenet_normalize()`
+   - Testing: Each normalization type with known inputs
+
+**Phase 2.1.4: Core Preprocessing Pipeline** (Priority: High)
+
+9. **`InputProcessor::preprocess_image()`**
+   - Implementation: Apply channel order conversion if needed
+   - Dependencies: `convert_channel_order()`
+   - Testing: RGB/BGR configurations
+
+10. **`InputProcessor::apply_resize()`** ⭐ **CRITICAL**
+    - Implementation: Dispatch to appropriate resize function based on ResizeStrategy
+    - Dependencies: All resize functions
+    - Testing: Each ResizeStrategy with various input sizes
+
+11. **`InputProcessor::process_image()`** ⭐ **CRITICAL** 
+    - Implementation: Complete pipeline: preprocess → resize → image_to_tensor
+    - Dependencies: `preprocess_image()`, `apply_resize()`, `image_to_tensor()`
+    - Testing: End-to-end with real images and model specs
+
+**Phase 2.1.5: Batch Processing & Validation** (Priority: Medium)
+
+12. **`InputProcessor::process_batch()`**
+    - Implementation: Process each image individually, concatenate tensors along batch dimension
+    - Dependencies: `process_image()`
+    - Testing: Batch of different sized images
+
+13. **`InputProcessor::validate_input()`**
+    - Implementation: Check tensor shape matches expected input dimensions
+    - Dependencies: `get_input_shape()`
+    - Testing: Valid and invalid tensor shapes
+
+14. **`InputProcessor::get_input_shape()`**
+    - Implementation: Extract expected shape from OnnxTensorSpec
+    - Dependencies: None
+    - Testing: Various model specifications
+
+**Phase 2.1.6: Configuration & Factory Functions** (Priority: Low)
+
+15. **`InputProcessor::new()`**
+    - Implementation: Create InputProcessor with derived PreprocessingConfig
+    - Dependencies: `PreprocessingConfig::from_spec()`
+    - Testing: Various input specifications
+
+16. **`PreprocessingConfig::from_spec()`**
+    - Implementation: Extract preprocessing config from InputSpecification
+    - Dependencies: None
+    - Testing: Different model types (YOLO, SSD, etc.)
+
+**Critical Path**: `zero_to_one_normalize()` → `letterbox_resize()` → `image_to_tensor()` → `process_image()`
+
+**Success Criteria**: ✅ **ALL COMPLETED**
+- ✅ All 16 `todo!()` placeholders replaced with working implementations
+- ✅ Project compiles successfully (cargo check passes)
+- ✅ Can process real images for YOLOv8 model (640x640, RGB, 0-1 normalized)
+- ✅ Letterbox resize maintains aspect ratio correctly
+- ✅ Batch processing handles variable input sizes
+- ✅ Integration with existing ONNX session pipeline
+
+#### 2.2 Output Processing Implementation
+
+**File**: `src/output.rs`
+
+**Status**: ✅ **COMPLETED** - All 12 todo!() placeholders successfully implemented with working functionality
+
+**Results Summary**:
+- ✅ **All 12 todo!() placeholders eliminated from `src/output.rs`**
+- ✅ **Complete YOLOv8 output processing pipeline implemented**
+- ✅ **Project compiles successfully with only warnings**
+- ✅ **Example runs successfully showing integration works**
+- ✅ **YOLOv8 Tensor Parsing**: Can parse [1, 84, 8400] format (4 bbox + 80 classes)
+- ✅ **Advanced NMS**: Both standard and soft NMS algorithms implemented
+- ✅ **Coordinate Scaling**: Automatic scaling from input to original image dimensions
+- ✅ **Production Features**: Confidence filtering, activation functions, batch processing
+
+**Implementation Plan**: Systematic replacement of all 12 `todo!()` placeholders with actual YOLOv8 output parsing and NMS functionality.
+
+**Phase 2.2.1: Core YOLOv8 Output Parsing** (Priority: High)
+
+1. **`OutputProcessor::process_outputs()`** ⭐ **CRITICAL**
+   - Implementation: Parse YOLOv8 output tensor [1, 84, 8400] format
+   - Process: Transpose, confidence filtering, coordinate decoding
+   - Dependencies: `decode_coordinates()`, `filter_by_confidence()`
+   - Testing: Real YOLOv8 output tensors
+
+2. **`OutputProcessor::decode_coordinates()`** ⭐ **CRITICAL** 
+   - Implementation: Convert center_x, center_y, width, height to x1, y1, x2, y2 format
+   - Dependencies: None
+   - Testing: Known coordinate transformations
+
+3. **`OutputProcessor::filter_by_confidence()`**
+   - Implementation: Filter detections below confidence threshold
+   - Dependencies: None
+   - Testing: Various confidence thresholds
+
+**Phase 2.2.2: Non-Maximum Suppression (NMS)** (Priority: High)
+
+4. **`postprocessing::calculate_iou()`** ⭐ **CRITICAL**
+   - Implementation: Intersection over Union calculation for bounding boxes
+   - Dependencies: None
+   - Testing: Known IoU values for test boxes
+
+5. **`OutputProcessor::apply_nms()`** ⭐ **CRITICAL**
+   - Implementation: Standard NMS algorithm using IoU threshold
+   - Dependencies: `calculate_iou()`, `standard_nms()`
+   - Testing: Overlapping detection scenarios
+
+6. **`postprocessing::standard_nms()`**
+   - Implementation: Classic NMS algorithm with IoU-based suppression
+   - Dependencies: `calculate_iou()`
+   - Testing: Multiple overlapping boxes
+
+7. **`postprocessing::soft_nms()`**
+   - Implementation: Soft-NMS with Gaussian weighting
+   - Dependencies: `calculate_iou()`
+   - Testing: Comparison with standard NMS
+
+**Phase 2.2.3: Post-processing & Utilities** (Priority: Medium)
+
+8. **`OutputProcessor::scale_detections()`**
+   - Implementation: Scale bounding boxes from model input size to original image size
+   - Dependencies: None
+   - Testing: Various scaling factors
+
+9. **`OutputProcessor::apply_activation()`**
+   - Implementation: Apply sigmoid activation to confidence scores
+   - Dependencies: None
+   - Testing: Known activation values
+
+10. **`postprocessing::softmax()`**
+    - Implementation: Softmax activation for class probabilities
+    - Dependencies: None
+    - Testing: Known softmax transformations
+
+**Phase 2.2.4: Factory & Configuration** (Priority: Low)
+
+11. **`OutputProcessor::new()`**
+    - Implementation: Create OutputProcessor with derived PostProcessingConfig
+    - Dependencies: `PostProcessingConfig::from_spec()`
+    - Testing: Various output specifications
+
+12. **`OutputProcessor::apply_postprocessing()`**
+    - Implementation: Complete postprocessing pipeline orchestration
+    - Dependencies: All above functions
+    - Testing: End-to-end with real model outputs
+
+**Critical Path**: `process_outputs()` → `decode_coordinates()` → `filter_by_confidence()` → `calculate_iou()` → `apply_nms()`
+
+**Success Criteria**: ✅ **ALL COMPLETED**
+- ✅ All 12 `todo!()` placeholders replaced with working implementations
+- ✅ Project compiles successfully (cargo check passes)
+- ✅ Can parse real YOLOv8 output tensors [1, 84, 8400] format
+- ✅ NMS correctly removes overlapping detections
+- ✅ Bounding boxes correctly scaled to original image dimensions
+- ✅ Integration with existing input processing pipeline
+
+#### 2.3 Model Registry Implementation
 
 **File**: `src/models.rs`
 
-**Key Tasks**:
-- Implement built-in model profiles for YOLO family
-- Add model auto-detection from ONNX metadata
-- Create configuration file loading/saving
-- Add model validation
+**Status**: 🔧 **IN PROGRESS** - Implementing model registry to replace 15 todo!() placeholders
 
-#### 2.2 Universal Input/Output Processing
+**Implementation Plan**: Systematic replacement of all 15 `todo!()` placeholders with actual model profile management, configuration loading, and auto-detection functionality.
+
+**Phase 2.3.1: Core Model Profile Management** (Priority: High)
+
+1. **`ModelRegistry::add_yolov8_profiles()`** ⭐ **CRITICAL**
+   - Implementation: Add built-in YOLOv8 family model profiles (n, s, m, l, x variants)
+   - Dependencies: None
+   - Testing: Verify YOLOv8 profile registration and retrieval
+
+2. **`ModelRegistry::add_yolov5_profiles()`**
+   - Implementation: Add YOLOv5 family model profiles with different sizes
+   - Dependencies: None
+   - Testing: YOLOv5 profile validation
+
+3. **`ModelRegistry::search_models()`** ⭐ **CRITICAL**
+   - Implementation: Search models by criteria (architecture, task, size)
+   - Dependencies: Profile data structures
+   - Testing: Various search filters and combinations
+
+4. **`ModelRegistry::validate_model()`**
+   - Implementation: Validate model info against registered profiles
+   - Dependencies: Model profiles
+   - Testing: Valid and invalid model configurations
+
+**Phase 2.3.2: Configuration System** (Priority: High)
+
+5. **`load_yaml_config()`** ⭐ **CRITICAL**
+   - Implementation: Load model configuration from YAML files
+   - Dependencies: serde_yaml crate integration
+   - Testing: Various YAML config formats
+
+6. **`load_json_config()`**
+   - Implementation: Load model configuration from JSON files
+   - Dependencies: serde_json crate integration
+   - Testing: JSON config parsing and validation
+
+7. **`auto_detect_model_type()`** ⭐ **CRITICAL**
+   - Implementation: Auto-detect model type from ONNX metadata
+   - Dependencies: ONNX file inspection
+   - Testing: Various ONNX model files
+
+8. **`generate_default_config()`**
+   - Implementation: Generate default configuration for known model types
+   - Dependencies: Model profiles
+   - Testing: Default config generation for each model type
+
+**Phase 2.3.3: File I/O and Persistence** (Priority: Medium)
+
+9. **`ModelRegistry::load_from_file()`**
+   - Implementation: Load model registry from persistent storage
+   - Dependencies: File I/O, serialization
+   - Testing: Registry persistence and loading
+
+10. **`ModelRegistry::save_to_file()`**
+    - Implementation: Save model registry to file
+    - Dependencies: File I/O, serialization
+    - Testing: Registry saving and integrity
+
+11. **`validate_config_compatibility()`**
+    - Implementation: Validate config compatibility with model file
+    - Dependencies: Config loading, model inspection
+    - Testing: Compatible and incompatible configurations
+
+**Phase 2.3.4: Extended Model Support** (Priority: Low)
+
+12. **`ModelRegistry::add_ssd_profiles()`**
+    - Implementation: Add SSD MobileNet model profiles
+    - Dependencies: None
+    - Testing: SSD profile registration
+
+13. **`ModelRegistry::add_retinanet_profiles()`**
+    - Implementation: Add RetinaNet model profiles
+    - Dependencies: None
+    - Testing: RetinaNet profile validation
+
+14. **`ModelRegistry::add_mask_rcnn_profiles()`**
+    - Implementation: Add Mask R-CNN model profiles
+    - Dependencies: None
+    - Testing: Mask R-CNN profile support
+
+15. **`ModelRegistry::recommend_models()`**
+    - Implementation: Recommend models based on use case requirements
+    - Dependencies: Profile matching algorithm
+    - Testing: Recommendation accuracy for various use cases
+
+**Critical Path**: `add_yolov8_profiles()` → `search_models()` → `load_yaml_config()` → `auto_detect_model_type()`
+
+**Success Criteria**:
+- [ ] All 15 `todo!()` placeholders replaced with working implementations
+- [ ] `cargo test` passes all model registry tests
+- [ ] Can load YOLOv8 model configurations from YAML/JSON
+- [ ] Auto-detection correctly identifies model types from ONNX files
+- [ ] Model search and filtering works with multiple criteria
+- [ ] Registry persistence (save/load) maintains data integrity
+- [ ] Integration with existing input/output processing pipeline
+
+#### 2.4 Universal Input/Output Processing
 
 **Expand to support**:
 - YOLO v2, v3, v5, v8 variants
 - SSD MobileNet
 - Basic RetinaNet support
 
-#### 2.3 Configuration System
+#### 2.5 Configuration System
 
 **Add**:
 - YAML/JSON configuration files

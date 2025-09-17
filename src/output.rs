@@ -324,8 +324,11 @@ pub enum NMSStrategy {
 impl OutputProcessor {
     /// Create a new output processor with specification
     pub fn new(specification: OutputSpecification) -> Self {
-        // Implementation will be added in the actual build
-        todo!("OutputProcessor::new implementation")
+        let postprocessing_config = PostProcessingConfig::from_spec(&specification);
+        Self {
+            specification,
+            postprocessing_config,
+        }
     }
 
     /// Create an output processor from specification
@@ -343,8 +346,118 @@ impl OutputProcessor {
         input_shape: (u32, u32),
         original_shape: (u32, u32),
     ) -> crate::error::Result<Vec<Detection>> {
-        // Implementation will be added in the actual build
-        todo!("OutputProcessor::process_outputs implementation")
+        if outputs.is_empty() {
+            return Ok(Vec::new());
+        }
+        
+        // Assume YOLOv8 format: [1, 84, 8400] where 84 = 4 (bbox) + 80 (classes)
+        let output = &outputs[0];
+        let shape = output.shape();
+        
+        if shape.len() != 3 {
+            return Err(crate::error::UocvrError::ModelConfig {
+                message: format!("Expected 3D output tensor, got {}D", shape.len())
+            });
+        }
+        
+        let [batch_size, num_features, num_predictions] = [shape[0], shape[1], shape[2]];
+        
+        if batch_size != 1 {
+            return Err(crate::error::UocvrError::ModelConfig {
+                message: format!("Expected batch size 1, got {}", batch_size)
+            });
+        }
+        
+        if num_features < 84 {
+            return Err(crate::error::UocvrError::ModelConfig {
+                message: format!("Expected at least 84 features (4 bbox + 80 classes), got {}", num_features)
+            });
+        }
+        
+        let mut raw_detections = Vec::new();
+        
+        // Parse each prediction
+        for pred_idx in 0..num_predictions {
+            // Extract bbox coordinates (first 4 values)
+            let bbox = [
+                output[[0, 0, pred_idx]],
+                output[[0, 1, pred_idx]],
+                output[[0, 2, pred_idx]],
+                output[[0, 3, pred_idx]],
+            ];
+            
+            // Extract class logits (remaining values)
+            let mut class_logits = Vec::with_capacity((num_features - 4) as usize);
+            for class_idx in 4..num_features {
+                class_logits.push(output[[0, class_idx, pred_idx]]);
+            }
+            
+            // Apply sigmoid to class logits to get confidence scores
+            let mut class_scores = class_logits.clone();
+            self.apply_activation(&mut class_scores, &ActivationType::Sigmoid);
+            
+            // Find best class and confidence
+            let (best_class_idx, &max_confidence) = class_scores
+                .iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or((0, &0.0));
+            
+            // Only keep detections above confidence threshold
+            if max_confidence >= self.postprocessing_config.confidence_threshold {
+                // Convert center_x, center_y, width, height to absolute coordinates
+                let center_x = bbox[0];
+                let center_y = bbox[1];
+                let width = bbox[2];
+                let height = bbox[3];
+                
+                // Convert to corner coordinates for NMS
+                let x1 = center_x - width / 2.0;
+                let y1 = center_y - height / 2.0;
+                let x2 = center_x + width / 2.0;
+                let y2 = center_y + height / 2.0;
+                
+                raw_detections.push(RawDetection {
+                    bbox: [x1, y1, x2, y2],
+                    confidence: max_confidence,
+                    class_logits: vec![best_class_idx as f32], // Store class index
+                    grid_position: (0, 0), // Not used in YOLOv8
+                    stride: 1.0, // Not used in YOLOv8
+                });
+            }
+        }
+        
+        // Apply NMS
+        let filtered_detections = self.apply_nms(raw_detections);
+        
+        // Convert to final Detection format and scale to original image size
+        let mut final_detections = Vec::new();
+        for raw_det in filtered_detections {
+            let class_id = raw_det.class_logits[0] as u32;
+            
+            // Create BoundingBox in original image coordinates
+            let bbox = self.scale_bbox_to_original(
+                raw_det.bbox,
+                input_shape,
+                original_shape,
+            );
+            
+            final_detections.push(Detection {
+                bbox,
+                confidence: raw_det.confidence,
+                class_id,
+                class_name: Some(format!("class_{}", class_id)), // Default name
+                mask: None,
+                keypoints: None,
+            });
+        }
+        
+        // Limit to max detections
+        if final_detections.len() > self.postprocessing_config.max_detections {
+            final_detections.truncate(self.postprocessing_config.max_detections);
+        }
+        
+        Ok(final_detections)
     }
 
     /// Apply post-processing pipeline
@@ -354,8 +467,48 @@ impl OutputProcessor {
         input_shape: (u32, u32),
         original_shape: (u32, u32),
     ) -> crate::error::Result<Vec<Detection>> {
-        // Implementation will be added in the actual build
-        todo!("OutputProcessor::apply_postprocessing implementation")
+        // Step 1: Filter by confidence threshold
+        let confident_detections = self.filter_by_confidence(
+            raw_detections,
+            self.postprocessing_config.confidence_threshold,
+        );
+        
+        // Step 2: Apply NMS
+        let nms_detections = self.apply_nms(confident_detections);
+        
+        // Step 3: Convert to Detection format and scale coordinates
+        let mut final_detections = Vec::new();
+        for raw_det in nms_detections {
+            let class_id = if !raw_det.class_logits.is_empty() {
+                raw_det.class_logits[0] as u32
+            } else {
+                0
+            };
+            
+            // Scale bbox from input size to original size
+            let bbox = self.scale_bbox_to_original(
+                raw_det.bbox,
+                input_shape,
+                original_shape,
+            );
+            
+            final_detections.push(Detection {
+                bbox,
+                confidence: raw_det.confidence,
+                class_id,
+                class_name: Some(format!("class_{}", class_id)),
+                mask: None,
+                keypoints: None,
+            });
+        }
+        
+        // Step 4: Limit to max detections
+        if final_detections.len() > self.postprocessing_config.max_detections {
+            final_detections.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+            final_detections.truncate(self.postprocessing_config.max_detections);
+        }
+        
+        Ok(final_detections)
     }
 
     /// Decode coordinates from raw model output
@@ -365,14 +518,54 @@ impl OutputProcessor {
         grid_position: (usize, usize),
         stride: f32,
     ) -> crate::error::Result<BoundingBox> {
-        // Implementation will be added in the actual build
-        todo!("OutputProcessor::decode_coordinates implementation")
+        if raw_coords.len() < 4 {
+            return Err(crate::error::UocvrError::ModelConfig {
+                message: "Insufficient coordinate data".to_string()
+            });
+        }
+        
+        // For YOLO format: [center_x, center_y, width, height]
+        let (grid_x, grid_y) = grid_position;
+        
+        // Decode center coordinates relative to grid cell
+        let center_x = (raw_coords[0] + grid_x as f32) * stride;
+        let center_y = (raw_coords[1] + grid_y as f32) * stride;
+        let width = raw_coords[2] * stride;
+        let height = raw_coords[3] * stride;
+        
+        // Convert to corner coordinates and create BoundingBox
+        let x1 = center_x - width / 2.0;
+        let y1 = center_y - height / 2.0;
+        
+        Ok(BoundingBox {
+            x: x1,
+            y: y1,
+            width,
+            height,
+            format: crate::core::BoundingBoxFormat::TopLeftWidthHeight,
+        })
     }
 
     /// Apply activation function to raw outputs
     fn apply_activation(&self, values: &mut [f32], activation: &ActivationType) {
-        // Implementation will be added in the actual build
-        todo!("OutputProcessor::apply_activation implementation")
+        match activation {
+            ActivationType::Sigmoid => {
+                for val in values.iter_mut() {
+                    *val = postprocessing::sigmoid(*val);
+                }
+            },
+            ActivationType::Softmax => {
+                postprocessing::softmax(values);
+            },
+            ActivationType::Tanh => {
+                for val in values.iter_mut() {
+                    *val = val.tanh();
+                }
+            },
+            ActivationType::None => {
+                // No activation applied
+            }
+        }
     }
 
     /// Filter detections by confidence threshold
@@ -381,14 +574,20 @@ impl OutputProcessor {
         detections: Vec<RawDetection>,
         threshold: f32,
     ) -> Vec<RawDetection> {
-        // Implementation will be added in the actual build
-        todo!("OutputProcessor::filter_by_confidence implementation")
+        detections
+            .into_iter()
+            .filter(|det| det.confidence >= threshold)
+            .collect()
     }
 
     /// Apply Non-Maximum Suppression
     fn apply_nms(&self, detections: Vec<RawDetection>) -> Vec<RawDetection> {
-        // Implementation will be added in the actual build
-        todo!("OutputProcessor::apply_nms implementation")
+        match self.postprocessing_config.nms_threshold {
+            threshold if threshold > 0.0 => {
+                postprocessing::standard_nms(detections, threshold)
+            },
+            _ => detections, // No NMS if threshold is 0 or negative
+        }
     }
 
     /// Scale detections from input size to original image size
@@ -398,8 +597,46 @@ impl OutputProcessor {
         input_size: (u32, u32),
         original_size: (u32, u32),
     ) -> Vec<Detection> {
-        // Implementation will be added in the actual build
-        todo!("OutputProcessor::scale_detections implementation")
+        let x_scale = original_size.0 as f32 / input_size.0 as f32;
+        let y_scale = original_size.1 as f32 / input_size.1 as f32;
+        
+        detections
+            .into_iter()
+            .map(|mut detection| {
+                // Scale bounding box coordinates
+                detection.bbox.x *= x_scale;
+                detection.bbox.y *= y_scale;
+                detection.bbox.width *= x_scale;
+                detection.bbox.height *= y_scale;
+                
+                detection
+            })
+            .collect()
+    }
+    
+    /// Helper function to scale a single bbox from input to original coordinates
+    fn scale_bbox_to_original(
+        &self,
+        bbox: [f32; 4], // [x1, y1, x2, y2]
+        input_size: (u32, u32),
+        original_size: (u32, u32),
+    ) -> BoundingBox {
+        let x_scale = original_size.0 as f32 / input_size.0 as f32;
+        let y_scale = original_size.1 as f32 / input_size.1 as f32;
+        
+        let [x1, y1, x2, y2] = bbox;
+        let scaled_x1 = x1 * x_scale;
+        let scaled_y1 = y1 * y_scale;
+        let scaled_x2 = x2 * x_scale;
+        let scaled_y2 = y2 * y_scale;
+        
+        BoundingBox {
+            x: scaled_x1,
+            y: scaled_y1,
+            width: scaled_x2 - scaled_x1,
+            height: scaled_y2 - scaled_y1,
+            format: crate::core::BoundingBoxFormat::TopLeftWidthHeight,
+        }
     }
 }
 
@@ -431,8 +668,32 @@ pub mod postprocessing {
 
     /// Calculate Intersection over Union (IoU)
     pub fn calculate_iou(box1: &[f32; 4], box2: &[f32; 4]) -> f32 {
-        // Implementation will be added in the actual build
-        todo!("calculate_iou implementation")
+        let [x1_min, y1_min, x1_max, y1_max] = *box1;
+        let [x2_min, y2_min, x2_max, y2_max] = *box2;
+        
+        // Calculate intersection area
+        let inter_x_min = x1_min.max(x2_min);
+        let inter_y_min = y1_min.max(y2_min);
+        let inter_x_max = x1_max.min(x2_max);
+        let inter_y_max = y1_max.min(y2_max);
+        
+        // Check if there's any intersection
+        if inter_x_min >= inter_x_max || inter_y_min >= inter_y_max {
+            return 0.0;
+        }
+        
+        let intersection = (inter_x_max - inter_x_min) * (inter_y_max - inter_y_min);
+        
+        // Calculate union area
+        let area1 = (x1_max - x1_min) * (y1_max - y1_min);
+        let area2 = (x2_max - x2_min) * (y2_max - y2_min);
+        let union = area1 + area2 - intersection;
+        
+        if union <= 0.0 {
+            0.0
+        } else {
+            intersection / union
+        }
     }
 
     /// Apply sigmoid activation
@@ -442,8 +703,26 @@ pub mod postprocessing {
 
     /// Apply softmax activation
     pub fn softmax(values: &mut [f32]) {
-        // Implementation will be added in the actual build
-        todo!("softmax implementation")
+        if values.is_empty() {
+            return;
+        }
+        
+        // Find max value for numerical stability
+        let max_val = values.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+        
+        // Compute exp(x - max) and sum
+        let mut sum = 0.0;
+        for val in values.iter_mut() {
+            *val = (*val - max_val).exp();
+            sum += *val;
+        }
+        
+        // Normalize by sum
+        if sum > 0.0 {
+            for val in values.iter_mut() {
+                *val /= sum;
+            }
+        }
     }
 
     /// Convert center-width-height to corner coordinates
@@ -462,20 +741,77 @@ pub mod postprocessing {
 
     /// Standard Non-Maximum Suppression
     pub fn standard_nms(
-        detections: Vec<RawDetection>,
+        mut detections: Vec<RawDetection>,
         iou_threshold: f32,
     ) -> Vec<RawDetection> {
-        // Implementation will be added in the actual build
-        todo!("standard_nms implementation")
+        if detections.is_empty() {
+            return detections;
+        }
+        
+        // Sort by confidence (highest first)
+        detections.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+        
+        let mut keep = Vec::new();
+        let mut suppressed = vec![false; detections.len()];
+        
+        for i in 0..detections.len() {
+            if suppressed[i] {
+                continue;
+            }
+            
+            keep.push(detections[i].clone());
+            
+            // Suppress overlapping detections
+            for j in (i + 1)..detections.len() {
+                if suppressed[j] {
+                    continue;
+                }
+                
+                let iou = calculate_iou(&detections[i].bbox, &detections[j].bbox);
+                if iou > iou_threshold {
+                    suppressed[j] = true;
+                }
+            }
+        }
+        
+        keep
     }
 
     /// Soft Non-Maximum Suppression
     pub fn soft_nms(
-        detections: Vec<RawDetection>,
+        mut detections: Vec<RawDetection>,
         iou_threshold: f32,
         sigma: f32,
     ) -> Vec<RawDetection> {
-        // Implementation will be added in the actual build
-        todo!("soft_nms implementation")
+        if detections.is_empty() {
+            return detections;
+        }
+        
+        // Sort by confidence (highest first)
+        detections.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+        
+        let mut keep = Vec::new();
+        
+        for i in 0..detections.len() {
+            let mut max_detection = detections[i].clone();
+            
+            // Apply soft suppression
+            for j in (i + 1)..detections.len() {
+                let iou = calculate_iou(&max_detection.bbox, &detections[j].bbox);
+                
+                if iou > iou_threshold {
+                    // Apply Gaussian weighting to reduce confidence
+                    let weight = (-iou * iou / sigma).exp();
+                    detections[j].confidence *= weight;
+                }
+            }
+            
+            keep.push(max_detection);
+        }
+        
+        // Filter out detections with very low confidence after soft suppression
+        keep.into_iter()
+            .filter(|det| det.confidence > 0.001) // Minimum threshold
+            .collect()
     }
 }

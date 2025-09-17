@@ -41,6 +41,9 @@ pub mod models;
 pub mod error;
 pub mod utils;
 
+#[cfg(test)]
+mod models_test;
+
 // Re-export main types for convenience
 pub use crate::core::{
     UniversalSession, InferenceResult, Detection, BoundingBox,
