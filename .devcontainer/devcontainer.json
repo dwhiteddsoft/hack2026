@@ -1,0 +1,16 @@
+{
+  "name": "Rust Tutorial",
+  "image": "mcr.microsoft.com/devcontainers/rust:bullseye",
+  "customizations": {
+    "vscode": {
+      "settings": {},
+      "extensions": [
+        "rust-lang.rust-analyzer", 
+        "matklad.rust-analyzer",
+        "vadimcn.vscode-lldb",
+        "davidanson.vscode-markdownlint"
+      ]
+    }
+  },
+  "postCreateCommand": "cargo install --locked cargo-edit cargo-watch && export LD_LIBRARY_PATH=\"/workspaces/hack/target/debug:$LD_LIBRARY_PATH\" && echo \"LD_LIBRARY_PATH set to: $LD_LIBRARY_PATH\""
+}
