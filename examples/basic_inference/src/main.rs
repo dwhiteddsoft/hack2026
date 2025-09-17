@@ -115,10 +115,10 @@ async fn batch_processing() -> Result<()> {
 
     // Load multiple images
     let image_paths = vec![
-        "test_images/image1.jpg",
-        "test_images/image2.jpg", 
-        "test_images/image3.jpg",
-        "test_images/image4.jpg",
+        "test_images/test_image.jpg",
+        // "test_images/image2.jpg", 
+        // "test_images/image3.jpg",
+        // "test_images/image4.jpg",
     ];
 
     let mut images = Vec::new();
