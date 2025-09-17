@@ -1,0 +1,10 @@
+[package]
+name = "basic_inference_example"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+uocvr = { path = "../.." }
+tokio = { version = "1.0", features = ["full"] }
+image = "0.24"
+anyhow = "1.0"
