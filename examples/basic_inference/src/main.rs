@@ -1,43 +1,72 @@
 use anyhow::Result;
-use uocvr::{UniversalSession, SessionBuilder};
+use uocvr::{SessionBuilder, UniversalSession};
 use uocvr::core::ExecutionProvider;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize logging
-    uocvr::utils::logging::init_logging()?;
+    // all the models
+    let models = vec![
+        // "models/retinanet-9.onnx",
+        // "models/MaskRCNN-12.onnx",
+        // "models/mobilenetv2-7.onnx",
+        // "models/ssd-10.onnx",
+        "models/yolov8n.onnx",
+        // "models/yolov2-coco-9.onnx",
+        // "models/yolov3-10.onnx",
+    ];
+    let pics = vec![
+        // "test_images/test_image_1.jpg",
+        "test_images/test_image_2.jpeg",
+        // "test_images/test_image_3.jpeg",
+        // "test_images/test_image_4.jpeg",
+        // "test_images/test_image_5.jpeg",
+        // "test_images/test_image_6.jpeg",
+        // "test_images/test_image_7.jpeg",
+        // "test_images/test_image_8.jpeg",
+        // "test_images/test_image_9.jpeg",
+    ];
+
+    // Initialize logging with ERROR level only (suppress INFO/WARN)
+    // uocvr::utils::logging::init_logging()?;
+    
+    // Custom logging setup - only show errors
+    use tracing_subscriber::filter::LevelFilter;
+    tracing_subscriber::fmt()
+        .with_max_level(LevelFilter::ERROR)
+        .init();
 
     println!("UOCVR Basic Inference Example");
     println!("=============================");
 
     // Example 1: Simple inference with auto-detection
-    println!("\n1. Simple inference with auto-detection:");
-    if let Err(e) = simple_inference().await {
-        eprintln!("Simple inference failed: {}", e);
+    //println!("\n1. Simple inference with auto-detection:");
+    for model_path in models {
+        println!("\nTesting model: {}", model_path);
+        for image_path in &pics {
+            if let Err(e) = simple_inference(model_path.to_string(), image_path.to_string()).await {
+                eprintln!("Simple inference failed: {}", e);
+            }
+        }
     }
 
     // Example 2: Advanced configuration
-    println!("\n2. Advanced configuration:");
-    if let Err(e) = advanced_configuration().await {
-        eprintln!("Advanced configuration failed: {}", e);
-    }
+    // println!("\n2. Advanced configuration:");
+    // if let Err(e) = advanced_configuration().await {
+    //     eprintln!("Advanced configuration failed: {}", e);
+    // }
 
     // Example 3: Batch processing
-    println!("\n3. Batch processing:");
-    if let Err(e) = batch_processing().await {
-        eprintln!("Batch processing failed: {}", e);
-    }
+    // println!("\n3. Batch processing:");
+    // if let Err(e) = batch_processing().await {
+    //     eprintln!("Batch processing failed: {}", e);
+    // }
 
     Ok(())
 }
 
 /// Simple inference example with automatic model detection
-async fn simple_inference() -> Result<()> {
-    // Note: These examples use placeholder paths - replace with actual model files
-    let model_path = "models/yolov8n.onnx";
-    let image_path = "test_images/test_image.jpg";
-
-    println!("Loading model: {}", model_path);
+async fn simple_inference(model_path: String, image_path: String) -> Result<()> {
+    //println!("Loading model: {}", model_path);
     
     // Create session with auto-detection (this will fail until implementation is complete)
     let session = match UniversalSession::from_model_file(model_path).await {
@@ -48,8 +77,8 @@ async fn simple_inference() -> Result<()> {
         }
     };
 
-    println!("Model loaded successfully!");
-    println!("Model info: {:?}", session.model_info());
+    //println!("Model loaded successfully!");
+    //println!("Model info: {:?}", session.model_info());
 
     // Run inference
     println!("Running inference on: {}", image_path);
@@ -79,6 +108,7 @@ async fn simple_inference() -> Result<()> {
 }
 
 /// Advanced configuration example
+#[allow(dead_code)]
 async fn advanced_configuration() -> Result<()> {
     let model_path = "models/yolov8s.onnx";
     let config_path = "configs/yolov8s_config.yaml";
@@ -110,6 +140,7 @@ async fn advanced_configuration() -> Result<()> {
 }
 
 /// Batch processing example
+#[allow(dead_code)]
 async fn batch_processing() -> Result<()> {
     println!("Loading images for batch processing...");
 

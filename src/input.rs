@@ -492,3 +492,42 @@ pub mod preprocessing {
         }
     }
 }
+
+impl Default for InputSpecification {
+    fn default() -> Self {
+        Self {
+            tensor_spec: OnnxTensorSpec {
+                input_name: "images".to_string(),
+                shape: OnnxTensorShape {
+                    dimensions: vec![
+                        OnnxDimension::Batch,
+                        OnnxDimension::Fixed(3),
+                        OnnxDimension::Fixed(640),
+                        OnnxDimension::Fixed(640),
+                    ],
+                },
+                data_type: OnnxDataType::Float32,
+                value_range: ValueRange { 
+                    normalization: NormalizationType::ZeroToOne,
+                    onnx_range: (0.0, 1.0),
+                },
+            },
+            preprocessing: OnnxPreprocessing {
+                resize_strategy: ResizeStrategy::Direct { target: (640, 640) },
+                normalization: NormalizationType::ZeroToOne,
+                tensor_layout: TensorLayout {
+                    format: "NCHW".to_string(),
+                    channel_order: "RGB".to_string(),
+                },
+            },
+            session_config: OnnxSessionConfig {
+                execution_providers: vec![crate::core::ExecutionProvider::CPU],
+                graph_optimization_level: crate::core::GraphOptimizationLevel::EnableBasic,
+                input_binding: InputBinding {
+                    input_names: vec!["images".to_string()],
+                    binding_strategy: BindingStrategy::SingleInput,
+                },
+            },
+        }
+    }
+}

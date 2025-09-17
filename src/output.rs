@@ -815,3 +815,89 @@ pub mod postprocessing {
             .collect()
     }
 }
+
+impl Default for OutputSpecification {
+    fn default() -> Self {
+        Self {
+            architecture_type: ArchitectureType::SingleStage {
+                unified_head: true,
+                anchor_based: false,
+            },
+            tensor_outputs: vec![TensorOutput {
+                name: "output0".to_string(),
+                shape: TensorShape {
+                    dimensions: vec![
+                        OutputDimension::Batch(1),
+                        OutputDimension::Combined(CombinedDimension {
+                            total_size: 84,
+                            components: vec![
+                                DimensionComponent {
+                                    component_type: ComponentType::BoundingBox,
+                                    size: 4,
+                                    offset: 0,
+                                },
+                                DimensionComponent {
+                                    component_type: ComponentType::Confidence,
+                                    size: 1,
+                                    offset: 4,
+                                },
+                                DimensionComponent {
+                                    component_type: ComponentType::ClassLogits,
+                                    size: 80,
+                                    offset: 5,
+                                },
+                            ],
+                        }),
+                        OutputDimension::Anchors(8400),
+                    ],
+                    layout_format: LayoutFormat::NCL,
+                },
+                content_type: ContentType::Combined {
+                    components: vec![
+                        ContentType::Regression {
+                            coordinate_format: CoordinateFormat::CenterWidthHeight,
+                            normalization: CoordinateNormalization::Pixel,
+                        },
+                        ContentType::Objectness {
+                            confidence_type: ConfidenceType::Objectness,
+                        },
+                        ContentType::Classification {
+                            num_classes: 80,
+                            background_class: false,
+                            multi_label: false,
+                        },
+                    ],
+                },
+                spatial_layout: SpatialLayout::Unified {
+                    total_predictions: 8400,
+                    multi_scale: true,
+                },
+                channel_interpretation: ChannelInterpretation::Unified {
+                    components: vec![
+                        ComponentRange {
+                            component_type: ComponentType::BoundingBox,
+                            start_channel: 0,
+                            end_channel: 4,
+                        },
+                        ComponentRange {
+                            component_type: ComponentType::Confidence,
+                            start_channel: 4,
+                            end_channel: 5,
+                        },
+                        ComponentRange {
+                            component_type: ComponentType::ClassLogits,
+                            start_channel: 5,
+                            end_channel: 85,
+                        },
+                    ],
+                },
+            }],
+            coordinate_system: CoordinateSystem::Direct,
+            activation_requirements: ActivationRequirements {
+                bbox_activation: ActivationType::None,
+                class_activation: ActivationType::Sigmoid,
+                confidence_activation: ActivationType::Sigmoid,
+            },
+        }
+    }
+}

@@ -131,11 +131,28 @@ pub mod math_utils {
 /// Logging utilities
 pub mod logging {
     use tracing::{info, error};
+    use tracing_subscriber::filter::LevelFilter;
     use std::time::Duration;
 
     /// Initialize logging system
     pub fn init_logging() -> crate::error::Result<()> {
         tracing_subscriber::fmt::init();
+        Ok(())
+    }
+
+    /// Initialize logging system with custom level
+    pub fn init_logging_with_level(level: LevelFilter) -> crate::error::Result<()> {
+        tracing_subscriber::fmt()
+            .with_max_level(level)
+            .init();
+        Ok(())
+    }
+
+    /// Initialize quiet logging (errors only)
+    pub fn init_quiet_logging() -> crate::error::Result<()> {
+        tracing_subscriber::fmt()
+            .with_max_level(LevelFilter::ERROR)
+            .init();
         Ok(())
     }
 
