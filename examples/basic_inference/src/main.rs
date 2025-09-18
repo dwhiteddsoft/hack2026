@@ -10,9 +10,9 @@ async fn main() -> Result<()> {
         // "models/MaskRCNN-12.onnx",
         // "models/mobilenetv2-7.onnx",
         ("models/ssd-10.onnx","configs/ssd-10_config.yaml"),
-        //("models/yolov8n.onnx","configs/yolov8n_config.yaml"),
-        //("models/yolov2-coco-9.onnx","configs/yolov2-coco-9_config.yaml"),
-        //("models/yolov3-10.onnx","configs/yolov3-10_config.yaml"),
+        ("models/yolov8n.onnx","configs/yolov8n_config.yaml"),
+        ("models/yolov2-coco-9.onnx","configs/yolov2-coco-9_config.yaml"),
+        ("models/yolov3-10.onnx","configs/yolov3-10_config.yaml"),
     ];
     let pics = vec![
         // "test_images/test_image_1.jpg",
