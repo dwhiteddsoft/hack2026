@@ -1,6 +1,11 @@
 use ndarray::ArrayD;
 use crate::core::{Detection, BoundingBox, Mask, Keypoint, InferenceMetadata};
 
+/// Sigmoid activation function
+fn sigmoid(x: f32) -> f32 {
+    1.0 / (1.0 + (-x).exp())
+}
+
 /// Universal output processor for ONNX computer vision models
 pub struct OutputProcessor {
     pub specification: OutputSpecification,
@@ -14,6 +19,7 @@ pub struct OutputSpecification {
     pub tensor_outputs: Vec<TensorOutput>,
     pub coordinate_system: CoordinateSystem,
     pub activation_requirements: ActivationRequirements,
+    pub loaded_config: Option<crate::session::YamlPostprocessingConfig>,
 }
 
 /// Architecture type classification
@@ -265,12 +271,25 @@ pub struct PostProcessingConfig {
 impl PostProcessingConfig {
     /// Create preprocessing config from output specification
     pub fn from_spec(spec: &OutputSpecification) -> Self {
-        Self {
-            confidence_threshold: 0.25, // Default value since spec.postprocessing doesn't exist
-            nms_threshold: 0.45,         // Default value
-            max_detections: 300,         // Default value
-            per_class_nms: true,         // Default value
-            multi_label: false,          // Default for now
+        // Use loaded YAML config values if available, otherwise fall back to defaults
+        if let Some(ref loaded_config) = spec.loaded_config {
+            let confidence_threshold = loaded_config.confidence_threshold.unwrap_or(0.5);
+            Self {
+                confidence_threshold,
+                nms_threshold: loaded_config.nms_threshold.unwrap_or(0.45),
+                max_detections: loaded_config.max_detections.unwrap_or(300),
+                per_class_nms: !loaded_config.class_agnostic_nms.unwrap_or(false), // Invert class_agnostic_nms
+                multi_label: false, // Not typically in YAML configs, keep default
+            }
+        } else {
+            // Fallback to hardcoded defaults when no config is loaded
+            Self {
+                confidence_threshold: 0.5,
+                nms_threshold: 0.45,
+                max_detections: 300,
+                per_class_nms: true,
+                multi_label: false,
+            }
         }
     }
 }
@@ -345,6 +364,7 @@ impl OutputProcessor {
         outputs: &[ArrayD<f32>],
         input_shape: (u32, u32),
         original_shape: (u32, u32),
+        model_name: &str,
     ) -> crate::error::Result<Vec<Detection>> {
         if outputs.is_empty() {
             return Ok(Vec::new());
@@ -354,19 +374,24 @@ impl OutputProcessor {
         let output = &outputs[0];
         let shape = output.shape();
         
-        match shape.len() {
-            3 => {
-                // YOLOv8 format: [1, 84, 8400]
-                self.process_yolov8_output(outputs, input_shape, original_shape)
-            },
-            4 => {
-                // YOLOv2 format: [1, 425, 13, 13]
-                self.process_yolov2_output(outputs, input_shape, original_shape)
-            },
-            _ => {
-                Err(crate::error::UocvrError::ModelConfig {
-                    message: format!("Unsupported output tensor dimension: {}D", shape.len())
-                })
+        // For YOLOv3, check if we have multiple outputs (multi-scale detection)
+        if model_name.contains("yolov3") {
+            self.process_yolov3_output(outputs, input_shape, original_shape)
+        } else {
+            match shape.len() {
+                3 => {
+                    // YOLOv8 format: [1, 84, 8400]
+                    self.process_yolov8_output(outputs, input_shape, original_shape)
+                },
+                4 => {
+                    // YOLOv2 format: [1, 425, 13, 13]
+                    self.process_yolov2_output(outputs, input_shape, original_shape)
+                },
+                _ => {
+                    Err(crate::error::UocvrError::ModelConfig {
+                        message: format!("Unsupported output tensor dimension: {}D", shape.len())
+                    })
+                }
             }
         }
     }
@@ -701,6 +726,145 @@ impl OutputProcessor {
         Ok(final_detections)
     }
 
+    /// Process YOLOv3-style multi-scale output tensors
+    fn process_yolov3_output(
+        &self,
+        outputs: &[ArrayD<f32>],
+        input_shape: (u32, u32),
+        original_shape: (u32, u32),
+    ) -> crate::error::Result<Vec<Detection>> {
+        //println!("  YOLOv3 processing: {} output tensors", outputs.len());
+        
+        // for (scale_idx, output) in outputs.iter().enumerate() {
+        //     let shape = output.shape();
+        //     println!("  Scale {}: tensor shape {:?}", scale_idx, shape);
+        // }
+        
+        // This YOLOv3-10 model uses a different format:
+        // - outputs[0]: [1, 10647, 4] - bounding boxes (x1, y1, x2, y2)
+        // - outputs[1]: [1, 80, 10647] - class probabilities  
+        // - outputs[2]: [2, 3] - metadata/other
+        
+        if outputs.len() < 2 {
+            return Ok(Vec::new());
+        }
+        
+        let bbox_output = &outputs[0];  // [1, 10647, 4]
+        let class_output = &outputs[1]; // [1, 80, 10647]
+        
+        let bbox_shape = bbox_output.shape();
+        let class_shape = class_output.shape();
+        
+        // Validate shapes
+        if bbox_shape.len() != 3 || class_shape.len() != 3 {
+            println!("  Error: Unexpected tensor dimensions");
+            return Ok(Vec::new());
+        }
+        
+        if bbox_shape[2] != 4 {
+            println!("  Error: Expected 4 bbox coordinates, got {}", bbox_shape[2]);
+            return Ok(Vec::new());
+        }
+        
+        let num_predictions = bbox_shape[1];
+        let num_classes = class_shape[1];
+        
+        if class_shape[2] != num_predictions {
+            println!("  Error: Bbox and class tensor size mismatch");
+            return Ok(Vec::new());
+        }
+        
+        //println!("  Processing {} predictions with {} classes", num_predictions, num_classes);
+        
+        let mut all_detections = Vec::new();
+        
+        // Process each prediction
+        for pred_idx in 0..num_predictions {
+            // Extract bounding box coordinates (assuming they're already in x1,y1,x2,y2 format)
+            let x1 = bbox_output[[0, pred_idx, 0]];
+            let y1 = bbox_output[[0, pred_idx, 1]];
+            let x2 = bbox_output[[0, pred_idx, 2]];
+            let y2 = bbox_output[[0, pred_idx, 3]];
+            
+            // Find best class and its probability
+            let mut best_class_idx = 0;
+            let mut best_class_prob = 0.0;
+            
+            for class_idx in 0..num_classes {
+                let class_prob = class_output[[0, class_idx, pred_idx]];
+                if class_prob > best_class_prob {
+                    best_class_prob = class_prob;
+                    best_class_idx = class_idx;
+                }
+            }
+            
+            // Apply sigmoid to class probability if needed
+            let final_confidence = sigmoid(best_class_prob);
+            
+            // Skip if confidence is too low
+            if final_confidence < self.postprocessing_config.confidence_threshold {
+                continue;
+            }
+            
+            // Skip invalid boxes
+            if x1 >= x2 || y1 >= y2 {
+                continue;
+            }
+            
+            // if all_detections.len() < 10 { // Show first few detections for debugging
+            //     println!("    Detection {}: class={}, conf={:.3}, bbox=({:.1},{:.1},{:.1},{:.1})", 
+            //         pred_idx, best_class_idx, final_confidence, x1, y1, x2, y2);
+            // }
+            
+            all_detections.push(RawDetection {
+                bbox: [x1, y1, x2, y2],
+                confidence: final_confidence,
+                class_logits: vec![best_class_idx as f32],
+                grid_position: (0, 0), // Not applicable for this format
+                stride: 1.0,           // Not applicable for this format
+            });
+        }
+        
+        //println!("  Found {} raw detections", all_detections.len());
+        
+        // Apply NMS
+        let filtered_detections = if self.postprocessing_config.nms_threshold > 0.0 {
+            self.apply_nms(all_detections)
+        } else {
+            all_detections
+        };
+        
+        // Convert to final detection format
+        let mut final_detections = Vec::new();
+        for raw_det in filtered_detections {
+            let class_id = raw_det.class_logits[0] as u32;
+            
+            // Create BoundingBox in original image coordinates
+            let bbox = self.scale_bbox_to_original(
+                raw_det.bbox,
+                input_shape,
+                original_shape,
+            );
+            
+            final_detections.push(Detection {
+                bbox,
+                confidence: raw_det.confidence,
+                class_id,
+                class_name: Some(format!("class_{}", class_id)),
+                mask: None,
+                keypoints: None,
+            });
+        }
+        
+        // Limit to max detections
+        if final_detections.len() > self.postprocessing_config.max_detections {
+            final_detections.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+            final_detections.truncate(self.postprocessing_config.max_detections);
+        }
+        
+        Ok(final_detections)
+    }
+
     /// Decode coordinates from raw model output
     fn decode_coordinates(
         &self,
@@ -843,7 +1007,7 @@ pub struct RawDetection {
 impl Default for PostProcessingConfig {
     fn default() -> Self {
         Self {
-            confidence_threshold: 0.25,
+            confidence_threshold: 0.5,  // Higher default threshold
             nms_threshold: 0.45,
             max_detections: 300,
             per_class_nms: true,
@@ -1088,6 +1252,7 @@ impl Default for OutputSpecification {
                 class_activation: ActivationType::Sigmoid,
                 confidence_activation: ActivationType::Sigmoid,
             },
+            loaded_config: None,
         }
     }
 }

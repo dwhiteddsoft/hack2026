@@ -4,6 +4,31 @@ use ort::{Environment, Session, SessionBuilder as OrtSessionBuilder};
 use crate::core::{UniversalSession, ModelInfo, ExecutionProvider, GraphOptimizationLevel};
 use crate::input::{InputProcessor, InputSpecification};
 use crate::output::{OutputProcessor, OutputSpecification};
+use serde::{Deserialize, Serialize};
+
+/// YAML configuration structure for postprocessing settings
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct YamlPostprocessingConfig {
+    pub nms_enabled: Option<bool>,
+    pub confidence_threshold: Option<f32>,
+    pub objectness_threshold: Option<f32>,
+    pub nms_threshold: Option<f32>,
+    pub max_detections: Option<usize>,
+    pub class_agnostic_nms: Option<bool>,
+    pub coordinate_decoding: Option<String>,
+}
+
+/// YAML configuration root structure
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct YamlConfig {
+    pub model: Option<serde_yaml::Value>,
+    pub input: Option<serde_yaml::Value>,
+    pub output: Option<serde_yaml::Value>,
+    pub postprocessing: Option<YamlPostprocessingConfig>,
+    pub processing: Option<serde_yaml::Value>,
+    pub execution: Option<serde_yaml::Value>,
+    pub classes: Option<serde_yaml::Value>,
+}
 
 /// Session manager for ONNX Runtime sessions
 pub struct SessionManager {
@@ -277,6 +302,7 @@ impl SessionFactory {
     /// Load model configuration from file
     async fn load_model_config(config_path: &str) -> crate::error::Result<ModelInfo> {
         use std::path::Path;
+        use std::fs;
         
         if !Path::new(config_path).exists() {
             return Err(crate::error::UocvrError::ResourceNotFound {
@@ -284,10 +310,45 @@ impl SessionFactory {
             });
         }
         
-        // For now, return error indicating this feature is not yet implemented
-        Err(crate::error::UocvrError::Session {
-            message: format!("Model config loading from {} not yet implemented", config_path),
-        })
+        // Read and parse YAML config file
+        let config_content = fs::read_to_string(config_path)
+            .map_err(|e| crate::error::UocvrError::Session {
+                message: format!("Failed to read config file {}: {}", config_path, e),
+            })?;
+            
+        let yaml_config: YamlConfig = serde_yaml::from_str(&config_content)
+            .map_err(|e| crate::error::UocvrError::Session {
+                message: format!("Failed to parse YAML config {}: {}", config_path, e),
+            })?;
+        
+        // Create ModelInfo with loaded config
+        // For now, we'll create a basic ModelInfo and enhance it with the config data
+        let input_spec = InputSpecification::default();
+        let mut output_spec = OutputSpecification::default();
+        
+        // Store the loaded postprocessing config in the output spec
+        output_spec.loaded_config = yaml_config.postprocessing.clone();
+        
+        let model_info = ModelInfo {
+            name: "loaded_from_config".to_string(),
+            version: "1.0".to_string(),
+            architecture: crate::core::ArchitectureType::SingleStage {
+                unified_head: true,
+                anchor_based: false,
+            },
+            input_spec,
+            output_spec,
+            preprocessing_config: crate::core::PreprocessingConfig {
+                resize_strategy: crate::core::ResizeStrategy::Direct { target: (416, 416) },
+                normalization: crate::core::NormalizationType::ZeroToOne,
+                tensor_layout: crate::core::TensorLayout {
+                    format: "NCHW".to_string(),
+                    channel_order: "RGB".to_string(),
+                },
+            },
+        };
+        
+        Ok(model_info)
     }
 
     /// Create input processor from model info

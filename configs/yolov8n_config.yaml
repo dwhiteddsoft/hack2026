@@ -24,6 +24,6 @@ output:
       shape: [1, 84, 8400]
       format: "yolov8"
   postprocessing:
-    confidence_threshold: 0.25
+    confidence_threshold: 0.60
     nms_threshold: 0.45
     max_detections: 300

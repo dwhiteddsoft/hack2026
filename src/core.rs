@@ -296,11 +296,22 @@ impl SessionBuilder {
             .to_string_lossy()
             .to_string();
         
-        // Determine input size based on model type
+        // Determine input size based on model type - only use defaults for YOLO models
         let input_size = if model_name.contains("yolov2") {
-            (416u32, 416u32)  // YOLOv2 actually expects 416x416 as confirmed by ORT error
+            (416u32, 416u32)  // YOLOv2 expects 416x416
+        } else if model_name.contains("yolov3") {
+            (416u32, 416u32)  // YOLOv3 uses 416x416 input
+        } else if model_name.contains("yolov8") {
+            (640u32, 640u32)  // YOLOv8 uses 640x640 input
+        } else if self.config_path.is_none() {
+            // For non-YOLO models, require a config file - don't use YOLO defaults
+            return Err(crate::error::UocvrError::ModelConfig {
+                message: format!("Model {} requires a configuration file. YOLO defaults not applicable for non-YOLO models.", model_name),
+            });
         } else {
-            (640u32, 640u32)  // Default for YOLOv8 and others
+            // Non-YOLO model with config file - will determine size from config
+            // Use placeholder size for now, will be updated from config
+            (640u32, 640u32)
         };
 
         // Create input and output specifications with model-specific input size
@@ -338,15 +349,44 @@ impl SessionBuilder {
                 },
             },
         };
-        let output_spec = crate::output::OutputSpecification::default();
+        let mut output_spec = crate::output::OutputSpecification::default();
+        
+        // Load YAML config if provided - fail if config is required but cannot be loaded
+        if let Some(ref config_path) = self.config_path {
+            match load_yaml_postprocessing_config(config_path).await {
+                Ok(yaml_config) => {
+                    output_spec.loaded_config = Some(yaml_config);
+                }
+                Err(e) => {
+                    return Err(crate::error::UocvrError::ModelConfig {
+                        message: format!("Failed to load required configuration file '{}': {}", config_path, e),
+                    });
+                }
+            }
+        }
+        
+        // Determine architecture type based on model
+        let architecture = if model_name.contains("yolov2") {
+            crate::core::ArchitectureType::SingleStage {
+                unified_head: false,
+                anchor_based: true,
+            }
+        } else if model_name.contains("yolov3") {
+            crate::core::ArchitectureType::SingleStage {
+                unified_head: false,  // YOLOv3 has multiple detection heads
+                anchor_based: true,   // YOLOv3 uses anchor boxes
+            }
+        } else {
+            crate::core::ArchitectureType::SingleStage {
+                unified_head: true,   // YOLOv8 has unified head
+                anchor_based: false,  // YOLOv8 is anchor-free
+            }
+        };
         
         let model_info = ModelInfo {
             name: model_name,
             version: "1.0".to_string(),
-            architecture: crate::core::ArchitectureType::SingleStage {
-                unified_head: true,
-                anchor_based: false,
-            },
+            architecture,
             input_spec: input_spec.clone(),
             output_spec: output_spec.clone(),
             preprocessing_config: crate::core::PreprocessingConfig {
@@ -373,7 +413,7 @@ impl SessionBuilder {
             crate::input::OnnxDimension::Fixed(input_size.0 as i64), // width
         ];
         
-        let output_spec = crate::output::OutputSpecification::default();
+        // Note: output_spec was already created above with loaded config
 
         Ok(UniversalSession {
             id: Uuid::new_v4(),
@@ -437,6 +477,7 @@ impl UniversalSession {
             &outputs,
             input_shape,
             original_shape,
+            &self.model_info.name,
         )?;
 
         // println!("Found {} detections", detections.len());
@@ -452,6 +493,15 @@ impl UniversalSession {
 
     /// Run actual ONNX Runtime inference on input tensor
     fn run_onnx_inference(&self, input_tensor: &ndarray::Array4<f32>) -> crate::error::Result<Vec<ndarray::ArrayD<f32>>> {
+        if self.model_info.name.contains("yolov3") {
+            self.run_yolov3_inference(input_tensor)
+        } else {
+            self.run_single_input_inference(input_tensor)
+        }
+    }
+
+    /// Run inference for single-input models (YOLOv8, YOLOv2, etc.)
+    fn run_single_input_inference(&self, input_tensor: &ndarray::Array4<f32>) -> crate::error::Result<Vec<ndarray::ArrayD<f32>>> {
         use ort::Value;
         use ndarray::CowArray;
         
@@ -483,6 +533,67 @@ impl UniversalSession {
             // Convert the tensor view to an owned ArrayD
             let output_array = output_tensor.view().to_owned().into_dyn();
             output_arrays.push(output_array);
+        }
+
+        Ok(output_arrays)
+    }
+
+    /// Run inference for YOLOv3 models that require image_shape input
+    fn run_yolov3_inference(&self, input_tensor: &ndarray::Array4<f32>) -> crate::error::Result<Vec<ndarray::ArrayD<f32>>> {
+        use ort::Value;
+        use ndarray::CowArray;
+        
+        // Convert Array4 to dynamic array  
+        let input_dyn = input_tensor.view().into_dyn();
+        let input_cow = CowArray::from(input_dyn);
+        
+        // Create image_shape tensor [height, width] as [416, 416]
+        let image_shape = ndarray::Array2::from_shape_vec((1, 2), vec![416.0f32, 416.0f32])
+            .map_err(|e| crate::error::UocvrError::Runtime {
+                message: format!("Failed to create image_shape tensor: {}", e),
+            })?;
+        let shape_dyn = image_shape.view().into_dyn();
+        let shape_cow = CowArray::from(shape_dyn);
+        
+        // Create ORT values
+        let input_value = Value::from_array(self.session.allocator(), &input_cow)
+            .map_err(|e| crate::error::UocvrError::Runtime {
+                message: format!("Failed to create ORT input value: {}", e),
+            })?;
+            
+        let shape_value = Value::from_array(self.session.allocator(), &shape_cow)
+            .map_err(|e| crate::error::UocvrError::Runtime {
+                message: format!("Failed to create ORT image_shape value: {}", e),
+            })?;
+        
+        // Run inference with both inputs
+        let outputs = self.session
+            .run(vec![input_value, shape_value])
+            .map_err(|e| crate::error::UocvrError::Runtime {
+                message: format!("ONNX Runtime inference failed: {}", e),
+            })?;
+
+        // Convert outputs to ndarray format
+        let mut output_arrays = Vec::new();
+        for output in outputs {
+            // Try to extract as Float32 first, then Int32
+            if let Ok(output_tensor) = output.try_extract::<f32>() {
+                let output_array = output_tensor.view().to_owned().into_dyn();
+                output_arrays.push(output_array);
+            } else if let Ok(output_tensor) = output.try_extract::<i32>() {
+                // Convert Int32 to Float32
+                let int_array = output_tensor.view().to_owned().into_dyn();
+                let float_data: Vec<f32> = int_array.iter().map(|&x| x as f32).collect();
+                let float_array = ndarray::ArrayD::from_shape_vec(int_array.shape(), float_data)
+                    .map_err(|e| crate::error::UocvrError::Runtime {
+                        message: format!("Failed to convert Int32 output to Float32: {}", e),
+                    })?;
+                output_arrays.push(float_array);
+            } else {
+                return Err(crate::error::UocvrError::Runtime {
+                    message: "Failed to extract output tensor: unsupported data type".to_string(),
+                });
+            }
         }
 
         Ok(output_arrays)
@@ -561,6 +672,7 @@ impl UniversalSession {
                 &[mock_output],
                 input_shape,
                 original_shape,
+                &self.model_info.name,
             )?;
             let postprocessing_time = postprocessing_start.elapsed();
             
@@ -589,4 +701,94 @@ impl UniversalSession {
     pub fn model_info(&self) -> &ModelInfo {
         &self.model_info
     }
+}
+
+/// Load YAML postprocessing configuration from file
+async fn load_yaml_postprocessing_config(config_path: &str) -> crate::error::Result<crate::session::YamlPostprocessingConfig> {
+    use std::path::Path;
+    use std::fs;
+    
+    if !Path::new(config_path).exists() {
+        return Err(crate::error::UocvrError::ResourceNotFound {
+            resource: config_path.to_string(),
+        });
+    }
+    
+    // Read and parse YAML config file
+    let config_content = fs::read_to_string(config_path)
+        .map_err(|e| crate::error::UocvrError::Session {
+            message: format!("Failed to read config file {}: {}", config_path, e),
+        })?;
+        
+    let yaml_config: YamlConfig = serde_yaml::from_str(&config_content)
+        .map_err(|e| crate::error::UocvrError::Session {
+            message: format!("Failed to parse YAML config {}: {}", config_path, e),
+        })?;
+    
+    // Extract postprocessing config - try root level first, then nested under output
+    let postprocessing = if let Some(root_postprocessing) = yaml_config.postprocessing {
+        println!("📁 Found postprocessing config at root level");
+        root_postprocessing
+    } else if let Some(output_value) = &yaml_config.output {
+        // Try to parse nested postprocessing under output
+        if let Ok(output_config) = serde_yaml::from_value::<OutputConfig>(output_value.clone()) {
+            if let Some(nested_postprocessing) = output_config.postprocessing {
+                println!("📁 Found postprocessing config nested under output");
+                nested_postprocessing
+            } else {
+                println!("⚠️  No postprocessing config found in output section");
+                YamlPostprocessingConfig::default()
+            }
+        } else {
+            println!("⚠️  Failed to parse output section");
+            YamlPostprocessingConfig::default()
+        }
+    } else {
+        println!("⚠️  No postprocessing config found anywhere");
+        YamlPostprocessingConfig::default()
+    };
+    
+    println!("🎯 Loaded config - confidence_threshold: {:?}", postprocessing.confidence_threshold);
+    
+    Ok(crate::session::YamlPostprocessingConfig {
+        nms_enabled: postprocessing.nms_enabled,
+        confidence_threshold: postprocessing.confidence_threshold,
+        objectness_threshold: postprocessing.objectness_threshold,
+        nms_threshold: postprocessing.nms_threshold,
+        max_detections: postprocessing.max_detections,
+        class_agnostic_nms: postprocessing.class_agnostic_nms,
+        coordinate_decoding: postprocessing.coordinate_decoding,
+    })
+}
+
+/// YAML configuration structures for loading from config files
+#[derive(Debug, Clone, serde::Deserialize)]
+struct YamlConfig {
+    pub model: Option<serde_yaml::Value>,
+    pub input: Option<serde_yaml::Value>,
+    pub output: Option<serde_yaml::Value>,
+    pub postprocessing: Option<YamlPostprocessingConfig>,
+    pub processing: Option<serde_yaml::Value>,
+    pub execution: Option<serde_yaml::Value>,
+    pub classes: Option<serde_yaml::Value>,
+}
+
+/// YAML output configuration that can contain nested postprocessing
+#[derive(Debug, Clone, serde::Deserialize)]
+struct OutputConfig {
+    pub postprocessing: Option<YamlPostprocessingConfig>,
+    #[serde(flatten)]
+    pub other: std::collections::HashMap<String, serde_yaml::Value>,
+}
+
+/// YAML postprocessing configuration
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+struct YamlPostprocessingConfig {
+    pub nms_enabled: Option<bool>,
+    pub confidence_threshold: Option<f32>,
+    pub objectness_threshold: Option<f32>,
+    pub nms_threshold: Option<f32>,
+    pub max_detections: Option<usize>,
+    pub class_agnostic_nms: Option<bool>,
+    pub coordinate_decoding: Option<String>,
 }

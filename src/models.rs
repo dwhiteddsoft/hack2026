@@ -188,6 +188,7 @@ impl ModelRegistry {
                 class_activation: ActivationType::Sigmoid,
                 confidence_activation: ActivationType::Sigmoid,
             },
+            loaded_config: None,
         };
 
         // Common preprocessing config
@@ -931,6 +932,7 @@ pub mod config_loader {
                 class_activation: ActivationType::Sigmoid,
                 confidence_activation: ActivationType::Sigmoid,
             },
+            loaded_config: None,
         };
 
         // Create preprocessing config
