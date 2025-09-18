@@ -133,6 +133,7 @@ dependencies = [
  "anyhow",
  "image",
  "tokio",
+ "tracing-subscriber",
  "uocvr",
 ]
 

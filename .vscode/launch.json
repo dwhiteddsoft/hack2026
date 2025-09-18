@@ -1,0 +1,46 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug basic_inference",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--manifest-path=/workspaces/hack/examples/basic_inference/Cargo.toml",
+                    "--bin=basic_inference_example"
+                ],
+                "filter": {
+                    "name": "basic_inference_example",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "/workspaces/hack",
+            "env": {
+                "LD_LIBRARY_PATH": "/workspaces/hack/target/debug"
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug main project",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--manifest-path=/workspaces/hack/Cargo.toml"
+                ],
+                "filter": {
+                    "name": "uocvr",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "/workspaces/hack",
+            "env": {
+                "LD_LIBRARY_PATH": "/workspaces/hack/target/debug"
+            }
+        }
+    ]
+}

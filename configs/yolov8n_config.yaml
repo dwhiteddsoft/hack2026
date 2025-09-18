@@ -1,0 +1,29 @@
+model:
+  name: "yolov8n"
+  version: "8.0"
+  architecture: "single_stage"
+  
+input:
+  tensor_name: "images"
+  shape: [1, 3, 640, 640]
+  data_type: "float32"
+  preprocessing:
+    resize: 
+      strategy: "letterbox"
+      target: [640, 640]
+      padding_value: 0.447
+    normalize:
+      type: "zero_to_one"
+    layout:
+      format: "NCHW"
+      channel_order: "RGB"
+
+output:
+  tensors:
+    - name: "output0"
+      shape: [1, 84, 8400]
+      format: "yolov8"
+  postprocessing:
+    confidence_threshold: 0.25
+    nms_threshold: 0.45
+    max_detections: 300

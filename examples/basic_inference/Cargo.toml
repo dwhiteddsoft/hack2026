@@ -8,3 +8,4 @@ uocvr = { path = "../.." }
 tokio = { version = "1.0", features = ["full"] }
 image = "0.24"
 anyhow = "1.0"
+tracing-subscriber = "0.3"

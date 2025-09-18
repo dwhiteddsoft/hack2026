@@ -350,13 +350,45 @@ impl OutputProcessor {
             return Ok(Vec::new());
         }
         
-        // Assume YOLOv8 format: [1, 84, 8400] where 84 = 4 (bbox) + 80 (classes)
+        // Check tensor format and route to appropriate processor
+        let output = &outputs[0];
+        let shape = output.shape();
+        
+        match shape.len() {
+            3 => {
+                // YOLOv8 format: [1, 84, 8400]
+                self.process_yolov8_output(outputs, input_shape, original_shape)
+            },
+            4 => {
+                // YOLOv2 format: [1, 425, 13, 13]
+                self.process_yolov2_output(outputs, input_shape, original_shape)
+            },
+            _ => {
+                Err(crate::error::UocvrError::ModelConfig {
+                    message: format!("Unsupported output tensor dimension: {}D", shape.len())
+                })
+            }
+        }
+    }
+
+    /// Process YOLOv8-style 3D output tensors
+    fn process_yolov8_output(
+        &self,
+        outputs: &[ndarray::ArrayD<f32>],
+        input_shape: (u32, u32),
+        original_shape: (u32, u32),
+    ) -> crate::error::Result<Vec<Detection>> {
+        if outputs.is_empty() {
+            return Ok(Vec::new());
+        }
+        
+        // YOLOv8 format: [1, 84, 8400] where 84 = 4 (bbox) + 80 (classes)
         let output = &outputs[0];
         let shape = output.shape();
         
         if shape.len() != 3 {
             return Err(crate::error::UocvrError::ModelConfig {
-                message: format!("Expected 3D output tensor, got {}D", shape.len())
+                message: format!("Expected 3D output tensor for YOLOv8, got {}D", shape.len())
             });
         }
         
@@ -503,6 +535,164 @@ impl OutputProcessor {
         }
         
         // Step 4: Limit to max detections
+        if final_detections.len() > self.postprocessing_config.max_detections {
+            final_detections.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+            final_detections.truncate(self.postprocessing_config.max_detections);
+        }
+        
+        Ok(final_detections)
+    }
+
+    /// Process YOLOv2-style 4D output tensors
+    fn process_yolov2_output(
+        &self,
+        outputs: &[ndarray::ArrayD<f32>],
+        input_shape: (u32, u32),
+        original_shape: (u32, u32),
+    ) -> crate::error::Result<Vec<Detection>> {
+        if outputs.is_empty() {
+            return Ok(Vec::new());
+        }
+        
+        // YOLOv2 format: [1, 425, 13, 13] where 425 = 5 anchors × 85 each
+        let output = &outputs[0];
+        let shape = output.shape();
+        
+        if shape.len() != 4 {
+            return Err(crate::error::UocvrError::ModelConfig {
+                message: format!("Expected 4D output tensor for YOLOv2, got {}D", shape.len())
+            });
+        }
+        
+        let [batch_size, channels, grid_h, grid_w] = [shape[0], shape[1], shape[2], shape[3]];
+        
+        if batch_size != 1 {
+            return Err(crate::error::UocvrError::ModelConfig {
+                message: format!("Expected batch size 1, got {}", batch_size)
+            });
+        }
+        
+        if channels != 425 {
+            return Err(crate::error::UocvrError::ModelConfig {
+                message: format!("Expected 425 channels for YOLOv2, got {}", channels)
+            });
+        }
+        
+        if grid_h != 13 || grid_w != 13 {
+            return Err(crate::error::UocvrError::ModelConfig {
+                message: format!("Expected 13x13 grid for YOLOv2, got {}x{}", grid_h, grid_w)
+            });
+        }
+        
+        // YOLOv2 anchors (width, height) in pixels for 416x416 input
+        let anchors = [
+            (23.83, 28.27),   // 0.57273 * 416, 0.677385 * 416
+            (77.97, 85.80),   // 1.87446 * 416, 2.06253 * 416  
+            (138.88, 227.69), // 3.33843 * 416, 5.47434 * 416
+            (327.92, 146.76), // 7.88282 * 416, 3.52778 * 416
+            (406.53, 381.46), // 9.77052 * 416, 9.16828 * 416
+        ];
+        
+        let mut raw_detections = Vec::new();
+        
+        // Process each grid cell and anchor
+        for i in 0..grid_h {
+            for j in 0..grid_w {
+                for anchor_idx in 0..5 {
+                    let channel_offset = anchor_idx * 85;
+                    
+                    // Extract raw predictions for this anchor
+                    let tx = output[[0, channel_offset + 0, i, j]];
+                    let ty = output[[0, channel_offset + 1, i, j]];
+                    let tw = output[[0, channel_offset + 2, i, j]];
+                    let th = output[[0, channel_offset + 3, i, j]];
+                    let tc = output[[0, channel_offset + 4, i, j]];
+                    
+                    // Apply YOLOv2 coordinate transformations
+                    let x = (postprocessing::sigmoid(tx) + j as f32) / grid_w as f32;
+                    let y = (postprocessing::sigmoid(ty) + i as f32) / grid_h as f32;
+                    let w = anchors[anchor_idx].0 * tw.exp() / input_shape.0 as f32;
+                    let h = anchors[anchor_idx].1 * th.exp() / input_shape.1 as f32;
+                    let confidence = postprocessing::sigmoid(tc);
+                    
+                    // Skip low-confidence detections early
+                    if confidence < self.postprocessing_config.confidence_threshold {
+                        continue;
+                    }
+                    
+                    // Extract class probabilities
+                    let mut class_probs = Vec::with_capacity(80);
+                    for class_idx in 0..80 {
+                        class_probs.push(output[[0, channel_offset + 5 + class_idx, i, j]]);
+                    }
+                    
+                    // Apply softmax to class probabilities
+                    postprocessing::softmax(&mut class_probs);
+                    
+                    // Find best class
+                    let (best_class_idx, &max_class_prob) = class_probs
+                        .iter()
+                        .enumerate()
+                        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                        .unwrap_or((0, &0.0));
+                    
+                    // Calculate final confidence
+                    let final_confidence = confidence * max_class_prob;
+                    
+                    // Skip if final confidence is too low
+                    if final_confidence < self.postprocessing_config.confidence_threshold {
+                        continue;
+                    }
+                    
+                    // Convert to absolute coordinates
+                    let center_x = x * input_shape.0 as f32;
+                    let center_y = y * input_shape.1 as f32;
+                    let box_width = w * input_shape.0 as f32;
+                    let box_height = h * input_shape.1 as f32;
+                    
+                    // Convert to corner coordinates
+                    let x1 = center_x - box_width / 2.0;
+                    let y1 = center_y - box_height / 2.0;
+                    let x2 = center_x + box_width / 2.0;
+                    let y2 = center_y + box_height / 2.0;
+                    
+                    raw_detections.push(RawDetection {
+                        bbox: [x1, y1, x2, y2],
+                        confidence: final_confidence,
+                        class_logits: vec![best_class_idx as f32],
+                        grid_position: (i, j),
+                        stride: 32.0, // YOLOv2 stride
+                    });
+                }
+            }
+        }
+        
+        // Apply NMS
+        let filtered_detections = self.apply_nms(raw_detections);
+        
+        // Convert to final Detection format and scale to original image size
+        let mut final_detections = Vec::new();
+        for raw_det in filtered_detections {
+            let class_id = raw_det.class_logits[0] as u32;
+            
+            // Create BoundingBox in original image coordinates
+            let bbox = self.scale_bbox_to_original(
+                raw_det.bbox,
+                input_shape,
+                original_shape,
+            );
+            
+            final_detections.push(Detection {
+                bbox,
+                confidence: raw_det.confidence,
+                class_id,
+                class_name: Some(format!("class_{}", class_id)),
+                mask: None,
+                keypoints: None,
+            });
+        }
+        
+        // Limit to max detections
         if final_detections.len() > self.postprocessing_config.max_detections {
             final_detections.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
             final_detections.truncate(self.postprocessing_config.max_detections);

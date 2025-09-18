@@ -346,7 +346,7 @@ impl Default for MemoryTracker {
 /// Constants used throughout the library
 pub mod constants {
     /// Default confidence threshold
-    pub const DEFAULT_CONFIDENCE_THRESHOLD: f32 = 0.25;
+    pub const DEFAULT_CONFIDENCE_THRESHOLD: f32 = 0.70;
 
     /// Default NMS threshold
     pub const DEFAULT_NMS_THRESHOLD: f32 = 0.45;

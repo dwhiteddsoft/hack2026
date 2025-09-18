@@ -1,0 +1,2 @@
+[env]
+LD_LIBRARY_PATH = { value = "/workspaces/hack/target/debug", relative = true }
