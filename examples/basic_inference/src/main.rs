@@ -8,7 +8,7 @@ async fn main() -> Result<()> {
     let models = vec![
         // "models/retinanet-9.onnx",
         // "models/MaskRCNN-12.onnx",
-        // "models/mobilenetv2-7.onnx",
+        ("models/mobilenetv2-7.onnx","configs/mobilenetv2-7_config.yaml"),
         ("models/ssd-10.onnx","configs/ssd-10_config.yaml"),
         ("models/yolov8n.onnx","configs/yolov8n_config.yaml"),
         ("models/yolov2-coco-9.onnx","configs/yolov2-coco-9_config.yaml"),
@@ -116,9 +116,9 @@ async fn main() -> Result<()> {
 /// Advanced configuration example
 #[allow(dead_code)]
 async fn advanced_configuration(model_path: String, config_path: String, image_path: String) -> Result<()> {
-    println!("Creating session with advanced configuration:");
-    println!("  Model: {}", model_path);
-    println!("  Config: {}", config_path);
+    //println!("Creating session with advanced configuration:");
+    //println!("  Model: {}", model_path);
+    //println!("  Config: {}", config_path);
 
     // Create session with custom configuration
     let session = match SessionBuilder::new()

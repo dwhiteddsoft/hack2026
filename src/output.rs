@@ -379,6 +379,10 @@ impl OutputProcessor {
             self.process_yolov3_output(outputs, input_shape, original_shape)
         } else {
             match shape.len() {
+                2 => {
+                    // Classification format: [batch, classes] e.g., [1, 1000] for MobileNetV2
+                    self.process_classification_output(outputs, input_shape, original_shape)
+                },
                 3 => {
                     // YOLOv8 format: [1, 84, 8400]
                     self.process_yolov8_output(outputs, input_shape, original_shape)
@@ -865,6 +869,99 @@ impl OutputProcessor {
         Ok(final_detections)
     }
 
+    /// Process 2D classification output tensors (e.g., MobileNetV2)
+    fn process_classification_output(
+        &self,
+        outputs: &[ArrayD<f32>],
+        _input_shape: (u32, u32),
+        _original_shape: (u32, u32),
+    ) -> crate::error::Result<Vec<Detection>> {
+        if outputs.is_empty() {
+            return Ok(Vec::new());
+        }
+        
+        // Classification format: [batch, classes] e.g., [1, 1000] for MobileNetV2
+        let output = &outputs[0];
+        let shape = output.shape();
+        
+        if shape.len() != 2 {
+            return Err(crate::error::UocvrError::ModelConfig {
+                message: format!("Expected 2D output tensor for classification, got {}D", shape.len())
+            });
+        }
+        
+        let [batch_size, num_classes] = [shape[0], shape[1]];
+        
+        if batch_size != 1 {
+            return Err(crate::error::UocvrError::ModelConfig {
+                message: format!("Expected batch size 1, got {}", batch_size)
+            });
+        }
+        
+        // Extract class logits and apply softmax
+        let mut class_probs = Vec::with_capacity(num_classes);
+        let mut max_logit = f32::NEG_INFINITY;
+        
+        // Find max logit for numerical stability in softmax
+        for class_idx in 0..num_classes {
+            let logit = output[[0, class_idx]];
+            max_logit = max_logit.max(logit);
+        }
+        
+        // Compute softmax probabilities
+        let mut sum_exp = 0.0;
+        for class_idx in 0..num_classes {
+            let logit = output[[0, class_idx]];
+            let prob = (logit - max_logit).exp();
+            class_probs.push(prob);
+            sum_exp += prob;
+        }
+        
+        // Normalize probabilities
+        for prob in &mut class_probs {
+            *prob /= sum_exp;
+        }
+        
+        // Create "detections" for top-k class predictions
+        // For classification, we create pseudo-detections with full-image bounding boxes
+        let mut detections = Vec::new();
+        
+        // Get top predictions above confidence threshold
+        let mut class_indices_probs: Vec<(usize, f32)> = class_probs
+            .iter()
+            .enumerate()
+            .map(|(idx, &prob)| (idx, prob))
+            .filter(|(_, prob)| *prob >= self.postprocessing_config.confidence_threshold)
+            .collect();
+        
+        // Sort by probability descending
+        class_indices_probs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        
+        // Take top max_detections
+        let max_detections = self.postprocessing_config.max_detections;
+        for (class_idx, confidence) in class_indices_probs.into_iter().take(max_detections) {
+            // Create a full-image bounding box for classification results
+            let bbox = BoundingBox {
+                x: 0.0,
+                y: 0.0,
+                width: 1.0,  // Normalized coordinates: full image
+                height: 1.0,
+                format: crate::core::BoundingBoxFormat::TopLeftWidthHeight,
+            };
+            
+            detections.push(Detection {
+                bbox,
+                confidence,
+                class_id: class_idx as u32,
+                class_name: Some(format!("class_{}", class_idx)),
+                mask: None,
+                keypoints: None,
+            });
+        }
+        
+        Ok(detections)
+    }
+
     /// Decode coordinates from raw model output
     fn decode_coordinates(
         &self,
@@ -1147,7 +1244,7 @@ pub mod postprocessing {
         let mut keep = Vec::new();
         
         for i in 0..detections.len() {
-            let mut max_detection = detections[i].clone();
+            let max_detection = detections[i].clone();
             
             // Apply soft suppression
             for j in (i + 1)..detections.len() {

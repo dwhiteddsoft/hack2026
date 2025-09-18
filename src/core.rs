@@ -561,7 +561,7 @@ impl UniversalSession {
         let input_tensor = self.input_processor.process_image(&image)?;
         let input_shape = (input_tensor.shape()[2] as u32, input_tensor.shape()[3] as u32);
 
-        println!("🚀 ONNX Runtime inference pipeline activated!");
+        //println!("🚀 ONNX Runtime inference pipeline activated!");
         //println!("   Input tensor shape: {:?}", input_tensor.shape());
         //println!("   Model: {}", self.model_info.name);
 
