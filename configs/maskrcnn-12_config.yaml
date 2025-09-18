@@ -1,0 +1,221 @@
+# MaskRCNN-12 Configuration File
+# This configuration file specifies the parameters for Mask R-CNN instance segmentation model
+# 
+# ✅ Two-stage architecture: Region Proposal Network (RPN) + ROI heads
+# ✅ Supports object detection with instance segmentation masks
+# ✅ Variable input resolution with shortest edge scaling
+
+model:
+  name: "maskrcnn-12"
+  version: "1.2"
+  type: "instance_segmentation"
+  architecture: "two_stage"
+  backbone: "resnet50_fpn"
+
+input:
+  tensor_name: "image"
+  shape: [3, 800, 800]  # Standard Mask R-CNN input (variable resolution supported)
+  data_type: "float32"
+  preprocessing:
+    resize: 
+      strategy: "shortest_edge_scale"  # Scale shortest edge to target size
+      target: [800, 800]              # Target shortest edge size
+      max_size: 1333                  # Maximum dimension constraint
+      padding_value: 0.0
+    normalize:
+      type: "imagenet"                # ImageNet standard normalization
+      mean: [0.485, 0.456, 0.406]     # ImageNet RGB means
+      std: [0.229, 0.224, 0.225]      # ImageNet RGB standard deviations
+    layout:
+      format: "NCHW"                  # Batch, Channels, Height, Width
+      channel_order: "RGB"            # RGB color order
+    aspect_ratio:
+      preserve: true                  # Maintain original aspect ratio
+      variable_dimensions: true       # Support variable height/width
+
+output:
+  # Two-stage architecture with multiple output tensors
+  architecture_type: "two_stage"
+  
+  # Stage 1: Region Proposal Network (RPN) outputs
+  stage1_rpn:
+    classification:
+      # Objectness scores for multiple FPN levels
+      tensors:
+        - name: "rpn_cls_P2"
+          shape: [1, 3, 200, 200]    # [batch, anchors_per_location, H/4, W/4]
+          content: "objectness_scores"
+        - name: "rpn_cls_P3"
+          shape: [1, 3, 100, 100]    # [batch, anchors_per_location, H/8, W/8]
+          content: "objectness_scores"
+        - name: "rpn_cls_P4"
+          shape: [1, 3, 50, 50]      # [batch, anchors_per_location, H/16, W/16]
+          content: "objectness_scores"
+        - name: "rpn_cls_P5"
+          shape: [1, 3, 25, 25]      # [batch, anchors_per_location, H/32, W/32]
+          content: "objectness_scores"
+        - name: "rpn_cls_P6"
+          shape: [1, 3, 13, 13]      # [batch, anchors_per_location, H/64, W/64]
+          content: "objectness_scores"
+    
+    regression:
+      # Box regression deltas for multiple FPN levels
+      tensors:
+        - name: "rpn_reg_P2"
+          shape: [1, 12, 200, 200]   # [batch, anchors*4, H/4, W/4]
+          content: "box_deltas"
+        - name: "rpn_reg_P3"
+          shape: [1, 12, 100, 100]   # [batch, anchors*4, H/8, W/8]
+          content: "box_deltas"
+        - name: "rpn_reg_P4"
+          shape: [1, 12, 50, 50]     # [batch, anchors*4, H/16, W/16]
+          content: "box_deltas"
+        - name: "rpn_reg_P5"
+          shape: [1, 12, 25, 25]     # [batch, anchors*4, H/32, W/32]
+          content: "box_deltas"
+        - name: "rpn_reg_P6"
+          shape: [1, 12, 13, 13]     # [batch, anchors*4, H/64, W/64]
+          content: "box_deltas"
+  
+  # Stage 2: R-CNN head outputs
+  stage2_rcnn:
+    # Generated proposals from RPN
+    proposals:
+      shape: [1000, 4]               # [num_proposals, 4] - (x1, y1, x2, y2)
+      content: "object_proposals"
+      coordinate_format: "corner_coordinates"
+    
+    # ROI features extracted using RoIAlign
+    roi_features:
+      shape: [1000, 256, 7, 7]       # [num_rois, channels, height, width]
+      content: "roi_features"
+      spatial_resolution: [7, 7]
+    
+    # Classification head output
+    classification:
+      shape: [1000, 81]              # [num_rois, num_classes + background]
+      content: "class_logits"
+      num_classes: 80                # COCO dataset classes
+      background_class: true         # Includes background class
+    
+    # Box regression head output
+    regression:
+      shape: [1000, 320]             # [num_rois, num_classes * 4]
+      content: "box_regression"
+      coordinate_format: "center_width_height_deltas"
+      per_class: true                # Separate regression for each class
+    
+    # Mask head output
+    segmentation:
+      shape: [1000, 80, 28, 28]      # [num_rois, num_classes, mask_h, mask_w]
+      content: "mask_logits"
+      mask_resolution: [28, 28]      # High-resolution masks
+      activation: "sigmoid"          # Convert to probabilities
+      binary_masks: true             # Binary instance masks
+
+  # Final post-processed outputs
+  final_outputs:
+    detection_boxes:
+      shape: [100, 4]                # [max_detections, 4] - final boxes
+      coordinate_format: "corner_coordinates"
+      coordinates: "pixel"           # Pixel coordinates
+    
+    detection_scores:
+      shape: [100]                   # [max_detections] - confidence scores
+      range: [0.0, 1.0]              # Normalized probabilities
+    
+    detection_classes:
+      shape: [100]                   # [max_detections] - class IDs
+      type: "integer"                # 1-based class indices
+      range: [1, 80]                 # COCO class range
+    
+    detection_masks:
+      shape: [100, 800, 800]         # [max_detections, orig_h, orig_w]
+      content: "binary_masks"        # Binary instance masks
+      resolution: "original"         # Scaled to original image size
+      data_type: "float32"
+
+  postprocessing:
+    # RPN post-processing
+    rpn:
+      pre_nms_top_n_train: 2000      # Top proposals before NMS (training)
+      pre_nms_top_n_test: 1000       # Top proposals before NMS (inference)
+      post_nms_top_n_train: 2000     # Top proposals after NMS (training)
+      post_nms_top_n_test: 1000      # Top proposals after NMS (inference)
+      nms_threshold: 0.7             # NMS IoU threshold for proposals
+      min_size: 0                    # Minimum proposal size
+    
+    # Detection post-processing
+    detection:
+      confidence_threshold: 0.7      # Minimum detection confidence
+      nms_threshold: 0.5             # NMS IoU threshold for detections
+      max_detections: 100            # Maximum number of final detections
+      score_threshold: 0.05          # Pre-NMS score filtering
+      per_class_nms: true            # Apply NMS per class
+    
+    # Mask post-processing
+    mask:
+      threshold: 0.5                 # Binary mask threshold
+      mask_resolution: [28, 28]      # ROI mask resolution
+      upsample_to_bbox: true         # Upsample masks to bbox size
+
+  # Instance segmentation specific configuration
+  instance_segmentation:
+    num_classes: 80                  # COCO dataset classes
+    mask_format: "binary"            # Binary masks
+    coordinate_system: "pixel"       # Pixel coordinates
+    multi_class_masks: true          # Multiple classes per mask
+    
+  # Feature Pyramid Network configuration
+  fpn:
+    levels: ["P2", "P3", "P4", "P5", "P6"]  # FPN pyramid levels
+    strides: [4, 8, 16, 32, 64]            # Feature map strides
+    anchor_scales: [32, 64, 128, 256, 512] # Anchor scales per level
+    anchor_ratios: [0.5, 1.0, 2.0]         # Anchor aspect ratios
+    anchors_per_location: 3                 # Number of anchors per location
+
+  # ROI processing configuration
+  roi_config:
+    roi_align_resolution: [7, 7]      # ROI align output size for detection
+    mask_roi_align_resolution: [14, 14] # ROI align output size for masks
+    spatial_scale: [0.25, 0.125, 0.0625, 0.03125, 0.015625]  # FPN scales
+    sampling_ratio: 2                 # ROI align sampling ratio
+    canonical_scale: 224              # FPN level assignment scale
+    canonical_level: 4                # Base FPN level (P4)
+
+  # Model performance characteristics
+  performance:
+    model_size: "170MB"              # Approximate model size
+    inference_time: "~200ms"         # Measured inference time (CPU)
+    inference_time_gpu: "~50ms"      # Measured inference time (GPU)
+    parameters: "44.2M"              # Number of parameters
+    
+    # Accuracy metrics (COCO dataset)
+    bbox_ap: "37.1%"                 # Bounding box Average Precision
+    bbox_ap50: "58.0%"               # AP at IoU=0.50
+    bbox_ap75: "40.1%"               # AP at IoU=0.75
+    segm_ap: "33.6%"                 # Segmentation Average Precision
+    segm_ap50: "54.4%"               # Segmentation AP at IoU=0.50
+    segm_ap75: "35.9%"               # Segmentation AP at IoU=0.75
+    
+  # Memory and computational requirements
+  requirements:
+    min_gpu_memory: "6GB"            # Minimum GPU memory for inference
+    recommended_gpu_memory: "8GB"    # Recommended GPU memory
+    cpu_cores: 4                     # Recommended CPU cores
+    input_resolution_range: "400-1333" # Supported input resolution range
+
+  # ONNX-specific configuration
+  onnx:
+    opset_version: 12                # ONNX opset version
+    dynamic_axes:                    # Dynamic input dimensions
+      image: [2, 3]                  # Height and width can vary
+    input_names: ["image"]           # ONNX input tensor names
+    output_names: ["boxes", "scores", "labels", "masks"]  # ONNX output names
+    optimization_level: "all"        # Graph optimization level
+    
+  # Status: Ready for implementation
+  implementation_status: "specification_complete"
+  compatibility: ["onnx_runtime", "tensorrt", "openvino"]
+  dataset: "COCO"                    # Training dataset
+  framework_origin: "pytorch"       # Original training framework

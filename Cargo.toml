@@ -12,10 +12,11 @@ repository = "https://github.com/dwhiteddsoft/hack2026"
 
 [dependencies]
 # Core ONNX Runtime
-ort = { version = "1.16.3", features = ["download-binaries"] }
+ort = { version = "1.16.3", features = ["download-binaries", "half"] }
 
 # Array and tensor operations
 ndarray = "0.15"
+half = "2.3"
 
 # Image processing
 image = { version = "0.24", features = ["png", "jpeg"] }

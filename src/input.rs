@@ -147,7 +147,7 @@ impl InputProcessor {
 
     /// Process a batch of images for inference
     pub fn process_batch(&self, images: &[DynamicImage]) -> crate::error::Result<Array4<f32>> {
-        use ndarray::{Array, Axis};
+        use ndarray::Axis;
         
         if images.is_empty() {
             return Err(crate::error::UocvrError::ModelConfig {
@@ -181,7 +181,36 @@ impl InputProcessor {
         // Convert to i64 for comparison
         let actual_i64: Vec<i64> = actual_shape.iter().map(|&x| x as i64).collect();
         
-        // Check dimensions (allowing dynamic batch size)
+        // Handle 3D models: they expect [C, H, W] but we provide [1, C, H, W]
+        // We validate that the non-batch dimensions match
+        if expected_shape.len() == 3 && actual_i64.len() == 4 {
+            // For 3D models, validate [C, H, W] against [1, C, H, W]
+            if actual_i64[0] != 1 {
+                return Err(crate::error::UocvrError::ModelConfig {
+                    message: format!(
+                        "For 3D models, batch size must be 1, got {}",
+                        actual_i64[0]
+                    )
+                });
+            }
+            
+            // Check [C, H, W] dimensions
+            for (i, (&actual, &expected)) in actual_i64[1..].iter().zip(expected_shape.iter()).enumerate() {
+                if expected > 0 && actual != expected {
+                    return Err(crate::error::UocvrError::ModelConfig {
+                        message: format!(
+                            "Input tensor dimension {} mismatch: expected {}, got {}",
+                            i,
+                            expected,
+                            actual
+                        )
+                    });
+                }
+            }
+            return Ok(());
+        }
+        
+        // Handle 4D models: standard validation
         if actual_i64.len() != expected_shape.len() {
             return Err(crate::error::UocvrError::ModelConfig {
                 message: format!(
@@ -295,15 +324,33 @@ impl InputProcessor {
         // Apply normalization
         self.apply_normalization(&mut tensor_data)?;
         
-        // Create ndarray in NCHW format [1, 3, H, W]
-        let tensor = Array::from_shape_vec(
-            (1, 3, height as usize, width as usize),
-            tensor_data
-        ).map_err(|e| crate::error::UocvrError::ModelConfig {
-            message: format!("Failed to create tensor: {}", e)
-        })?;
+        // Check if model expects 3D input [C, H, W] or 4D input [N, C, H, W]
+        let expected_shape = self.get_input_shape();
+        let needs_3d = expected_shape.len() == 3;
         
-        Ok(tensor)
+        if needs_3d {
+            // Create tensor in CHW format [3, H, W] first
+            let tensor_3d = Array::from_shape_vec(
+                (3, height as usize, width as usize),
+                tensor_data
+            ).map_err(|e| crate::error::UocvrError::ModelConfig {
+                message: format!("Failed to create 3D tensor: {}", e)
+            })?;
+            
+            // Expand to 4D [1, 3, H, W] for compatibility with our pipeline
+            let tensor = tensor_3d.insert_axis(ndarray::Axis(0));
+            Ok(tensor)
+        } else {
+            // Create ndarray in NCHW format [1, 3, H, W]
+            let tensor = Array::from_shape_vec(
+                (1, 3, height as usize, width as usize),
+                tensor_data
+            ).map_err(|e| crate::error::UocvrError::ModelConfig {
+                message: format!("Failed to create tensor: {}", e)
+            })?;
+            
+            Ok(tensor)
+        }
     }
 }
 
@@ -312,7 +359,6 @@ impl PreprocessingConfig {
     pub fn from_spec(spec: &InputSpecification) -> Self {
         // Extract target size from tensor spec
         let mut target_size = (640, 640); // Default
-        let mut maintain_aspect_ratio = true;
         let mut padding_value = 0.447; // 114/255 for YOLO models
         
         // Try to extract dimensions from shape
@@ -324,21 +370,21 @@ impl PreprocessingConfig {
             }
         }
         
-        // Extract resize-specific parameters
-        match &spec.preprocessing.resize_strategy {
+        // Extract resize-specific parameters and determine maintain_aspect_ratio
+        let maintain_aspect_ratio = match &spec.preprocessing.resize_strategy {
             ResizeStrategy::Direct { target } => {
                 target_size = *target;
-                maintain_aspect_ratio = false;
+                false
             },
             ResizeStrategy::Letterbox { target, padding_value: pv } => {
                 target_size = *target;
                 padding_value = *pv;
-                maintain_aspect_ratio = true;
+                true
             },
             ResizeStrategy::ShortestEdge { .. } => {
-                maintain_aspect_ratio = true;
+                true
             }
-        }
+        };
         
         Self {
             target_size,

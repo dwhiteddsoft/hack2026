@@ -15,7 +15,7 @@ pub struct MemoryTracker {
 
 /// Image utilities
 pub mod image_utils {
-    use image::{DynamicImage, ImageBuffer, Rgb};
+    use image::DynamicImage;
 
     /// Load image from file path
     pub fn load_image<P: AsRef<std::path::Path>>(path: P) -> crate::error::Result<DynamicImage> {
@@ -24,7 +24,7 @@ pub mod image_utils {
 
     /// Load multiple images from directory
     pub fn load_images_from_dir<P: AsRef<std::path::Path>>(
-        dir_path: P,
+        _dir_path: P,
     ) -> crate::error::Result<Vec<DynamicImage>> {
         // Implementation will be added in the actual build
         todo!("load_images_from_dir implementation")
@@ -42,8 +42,8 @@ pub mod image_utils {
 
     /// Draw bounding boxes on image
     pub fn draw_detections(
-        image: &DynamicImage,
-        detections: &[crate::core::Detection],
+        _image: &DynamicImage,
+        _detections: &[crate::core::Detection],
     ) -> DynamicImage {
         // Implementation will be added in the actual build
         todo!("draw_detections implementation")
@@ -51,9 +51,9 @@ pub mod image_utils {
 
     /// Resize image while maintaining aspect ratio
     pub fn resize_maintain_aspect(
-        image: &DynamicImage,
-        target_width: u32,
-        target_height: u32,
+        _image: &DynamicImage,
+        _target_width: u32,
+        _target_height: u32,
     ) -> DynamicImage {
         // Implementation will be added in the actual build
         todo!("resize_maintain_aspect implementation")
@@ -229,7 +229,7 @@ pub mod config {
     }
 
     /// Validate configuration file
-    pub fn validate_config_file<P: AsRef<Path>>(path: P) -> crate::error::Result<()> {
+    pub fn validate_config_file<P: AsRef<Path>>(_path: P) -> crate::error::Result<()> {
         // Implementation will be added in the actual build
         todo!("validate_config_file implementation")
     }

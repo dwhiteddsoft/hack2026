@@ -7,7 +7,7 @@ async fn main() -> Result<()> {
     // all the models
     let models = vec![
         // "models/retinanet-9.onnx",
-        // "models/MaskRCNN-12.onnx",
+        //("models/MaskRCNN-12.onnx","configs/maskrcnn-12_config.yaml"),
         ("models/mobilenetv2-7.onnx","configs/mobilenetv2-7_config.yaml"),
         ("models/ssd-10.onnx","configs/ssd-10_config.yaml"),
         ("models/yolov8n.onnx","configs/yolov8n_config.yaml"),

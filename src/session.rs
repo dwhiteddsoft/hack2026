@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use std::collections::HashMap;
-use ort::{Environment, Session, SessionBuilder as OrtSessionBuilder};
+use ort::{Environment, Session};
 use crate::core::{UniversalSession, ModelInfo, ExecutionProvider, GraphOptimizationLevel};
 use crate::input::{InputProcessor, InputSpecification};
 use crate::output::{OutputProcessor, OutputSpecification};
@@ -32,6 +32,7 @@ pub struct YamlConfig {
 
 /// Session manager for ONNX Runtime sessions
 pub struct SessionManager {
+    #[allow(dead_code)]
     environment: Arc<Environment>,
     active_sessions: HashMap<uuid::Uuid, Arc<Session>>,
     session_configs: HashMap<uuid::Uuid, SessionConfig>,
@@ -77,7 +78,7 @@ impl SessionManager {
     pub async fn create_session(
         &mut self,
         model_path: &str,
-        config: SessionConfig,
+        _config: SessionConfig,
     ) -> crate::error::Result<uuid::Uuid> {
         use std::path::Path;
         
@@ -112,24 +113,6 @@ impl SessionManager {
         self.active_sessions.keys().cloned().collect()
     }
 
-    /// Create ONNX Runtime session builder with configuration
-    fn create_session_builder(&self, _config: &SessionConfig) -> crate::error::Result<OrtSessionBuilder> {
-        // Session builder creation not yet implemented - ORT API integration pending
-        Err(crate::error::UocvrError::Session {
-            message: "Session builder creation not yet implemented".to_string(),
-        })
-    }
-
-    /// Configure execution providers
-    fn configure_providers(
-        &self,
-        builder: OrtSessionBuilder,
-        _providers: &[ExecutionProvider],
-    ) -> crate::error::Result<OrtSessionBuilder> {
-        // For now, just use CPU provider
-        // Full provider configuration can be added later
-        Ok(builder)
-    }
 }
 
 impl SessionPool {
@@ -258,7 +241,7 @@ impl SessionFactory {
     pub async fn create_with_config(
         model_path: &str,
         config_path: Option<&str>,
-        session_config: SessionConfig,
+        _session_config: SessionConfig,
     ) -> crate::error::Result<UniversalSession> {
         use std::path::Path;
         
@@ -282,8 +265,8 @@ impl SessionFactory {
         };
         
         // Create processors
-        let input_processor = Self::create_input_processor(&model_info)?;
-        let output_processor = Self::create_output_processor(&model_info)?;
+        let _input_processor = Self::create_input_processor(&model_info)?;
+        let _output_processor = Self::create_output_processor(&model_info)?;
         
         // For now, return error indicating full ORT integration pending
         Err(crate::error::UocvrError::Session {
@@ -366,6 +349,7 @@ impl SessionFactory {
     }
 
     /// Validate session compatibility
+    #[allow(dead_code)]
     fn validate_session(_session: &Session, model_info: &ModelInfo) -> crate::error::Result<()> {
         // Basic validation - check that model info has required fields
         if model_info.name.is_empty() {
@@ -394,6 +378,7 @@ impl SessionFactory {
 /// Async session wrapper for non-blocking operations
 pub struct AsyncSession {
     session: Arc<UniversalSession>,
+    #[allow(dead_code)]
     executor: tokio::runtime::Handle,
 }
 
@@ -410,9 +395,9 @@ impl AsyncSession {
     /// Run inference asynchronously
     pub async fn infer_async(
         &self,
-        input: ndarray::Array4<f32>,
+        _input: ndarray::Array4<f32>,
     ) -> crate::error::Result<Vec<crate::core::Detection>> {
-        let session = self.session.clone();
+        let _session = self.session.clone();
         
         // Spawn a blocking task to run the inference
         let result = tokio::task::spawn_blocking(move || {
@@ -437,12 +422,12 @@ impl AsyncSession {
         &self,
         inputs: Vec<ndarray::Array4<f32>>,
     ) -> crate::error::Result<Vec<crate::core::InferenceResult>> {
-        let session = self.session.clone();
+        let _session = self.session.clone();
         let batch_size = inputs.len();
         
         // Spawn a blocking task to run the batch inference
         let result = tokio::task::spawn_blocking(move || {
-            let mut results = Vec::with_capacity(batch_size);
+            let results = Vec::with_capacity(batch_size);
             
                         // Process each input in the batch\n            for (index, _input) in inputs.iter().enumerate() {\n                // For now, simulate batch inference processing\n                // This will be replaced with actual UniversalSession inference once ORT integration is complete\n                std::thread::sleep(std::time::Duration::from_millis(5)); // Simulate processing time per item\n                \n                // Create placeholder inference result\n                let inference_result = crate::core::InferenceResult {\n                    detections: Vec::new(),\n                    processing_time: std::time::Duration::from_millis(5),\n                    metadata: crate::core::InferenceMetadata {\n                        model_name: format!(\"batch_model_{}\", index),\n                        input_shape: vec![1, 3, 640, 640],\n                        output_shapes: vec![vec![1, 25200, 85]],\n                        inference_time: std::time::Duration::from_millis(5),\n                        preprocessing_time: std::time::Duration::from_millis(1),\n                        postprocessing_time: std::time::Duration::from_millis(1),\n                    },\n                };\n                \n                results.push(inference_result);\n            }"
             

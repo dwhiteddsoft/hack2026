@@ -17,7 +17,7 @@ fn bench_sigmoid(c: &mut Criterion) {
 }
 
 fn bench_softmax(c: &mut Criterion) {
-    let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+    let values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
     
     c.bench_function("softmax", |b| {
         b.iter(|| {

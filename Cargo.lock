@@ -1672,6 +1672,7 @@ dependencies = [
  "anyhow",
  "criterion",
  "env_logger",
+ "half",
  "image",
  "ndarray",
  "once_cell",

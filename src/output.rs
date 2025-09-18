@@ -1,5 +1,5 @@
 use ndarray::ArrayD;
-use crate::core::{Detection, BoundingBox, Mask, Keypoint, InferenceMetadata};
+use crate::core::{Detection, BoundingBox};
 
 /// Sigmoid activation function
 fn sigmoid(x: f32) -> f32 {
@@ -377,6 +377,9 @@ impl OutputProcessor {
         // For YOLOv3, check if we have multiple outputs (multi-scale detection)
         if model_name.contains("yolov3") {
             self.process_yolov3_output(outputs, input_shape, original_shape)
+        } else if model_name.contains("maskrcnn") || model_name.contains("MaskRCNN") {
+            // Special handling for MaskRCNN models
+            self.process_maskrcnn_output(outputs, input_shape, original_shape)
         } else {
             match shape.len() {
                 2 => {
@@ -962,40 +965,6 @@ impl OutputProcessor {
         Ok(detections)
     }
 
-    /// Decode coordinates from raw model output
-    fn decode_coordinates(
-        &self,
-        raw_coords: &[f32],
-        grid_position: (usize, usize),
-        stride: f32,
-    ) -> crate::error::Result<BoundingBox> {
-        if raw_coords.len() < 4 {
-            return Err(crate::error::UocvrError::ModelConfig {
-                message: "Insufficient coordinate data".to_string()
-            });
-        }
-        
-        // For YOLO format: [center_x, center_y, width, height]
-        let (grid_x, grid_y) = grid_position;
-        
-        // Decode center coordinates relative to grid cell
-        let center_x = (raw_coords[0] + grid_x as f32) * stride;
-        let center_y = (raw_coords[1] + grid_y as f32) * stride;
-        let width = raw_coords[2] * stride;
-        let height = raw_coords[3] * stride;
-        
-        // Convert to corner coordinates and create BoundingBox
-        let x1 = center_x - width / 2.0;
-        let y1 = center_y - height / 2.0;
-        
-        Ok(BoundingBox {
-            x: x1,
-            y: y1,
-            width,
-            height,
-            format: crate::core::BoundingBoxFormat::TopLeftWidthHeight,
-        })
-    }
 
     /// Apply activation function to raw outputs
     fn apply_activation(&self, values: &mut [f32], activation: &ActivationType) {
@@ -1042,6 +1011,7 @@ impl OutputProcessor {
     }
 
     /// Scale detections from input size to original image size
+    #[allow(dead_code)]
     fn scale_detections(
         &self,
         detections: Vec<Detection>,
@@ -1075,19 +1045,49 @@ impl OutputProcessor {
         let x_scale = original_size.0 as f32 / input_size.0 as f32;
         let y_scale = original_size.1 as f32 / input_size.1 as f32;
         
-        let [x1, y1, x2, y2] = bbox;
-        let scaled_x1 = x1 * x_scale;
-        let scaled_y1 = y1 * y_scale;
-        let scaled_x2 = x2 * x_scale;
-        let scaled_y2 = y2 * y_scale;
+        // Scale coordinates from input to original size
+        let x1 = bbox[0] * x_scale;
+        let y1 = bbox[1] * y_scale;
+        let x2 = bbox[2] * x_scale;
+        let y2 = bbox[3] * y_scale;
+        
+        // Convert to top-left, width, height format
+        let width = x2 - x1;
+        let height = y2 - y1;
         
         BoundingBox {
-            x: scaled_x1,
-            y: scaled_y1,
-            width: scaled_x2 - scaled_x1,
-            height: scaled_y2 - scaled_y1,
+            x: x1,
+            y: y1,
+            width,
+            height,
             format: crate::core::BoundingBoxFormat::TopLeftWidthHeight,
         }
+    }
+
+    /// Process MaskRCNN-style output tensors
+    fn process_maskrcnn_output(
+        &self,
+        outputs: &[ArrayD<f32>],
+        _input_shape: (u32, u32),
+        _original_shape: (u32, u32),
+    ) -> crate::error::Result<Vec<Detection>> {
+        // 1. Detection boxes (bounding boxes)
+        // 2. Detection classes  
+        // 3. Detection scores
+        // 4. Detection masks
+        
+        if outputs.len() < 4 {
+            return Err(crate::error::UocvrError::ModelConfig {
+                message: format!("MaskRCNN requires 4 output tensors, got {}", outputs.len()),
+            });
+        }
+        
+        // For now, return empty detections since we have dummy tensors
+        // This is a placeholder implementation until we can properly extract real tensors
+        println!("WARNING: MaskRCNN output processing is using dummy data due to tensor extraction issues");
+        println!("Real implementation requires fixing the tensor data type extraction problem");
+        
+        Ok(Vec::new())
     }
 }
 

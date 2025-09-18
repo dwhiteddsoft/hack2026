@@ -343,24 +343,28 @@ impl ModelRegistry {
     }
 
     /// Add YOLOv5 model profiles
+    #[allow(dead_code)]
     fn add_yolov5_profiles(&mut self) {
         // Implementation will be added in the actual build
         todo!("ModelRegistry::add_yolov5_profiles implementation")
     }
 
     /// Add SSD model profiles
+    #[allow(dead_code)]
     fn add_ssd_profiles(&mut self) {
         // Implementation will be added in the actual build
         todo!("ModelRegistry::add_ssd_profiles implementation")
     }
 
     /// Add RetinaNet model profiles
+    #[allow(dead_code)]
     fn add_retinanet_profiles(&mut self) {
         // Implementation will be added in the actual build
         todo!("ModelRegistry::add_retinanet_profiles implementation")
     }
 
     /// Add Mask R-CNN model profiles
+    #[allow(dead_code)]
     fn add_mask_rcnn_profiles(&mut self) {
         // Implementation will be added in the actual build
         todo!("ModelRegistry::add_mask_rcnn_profiles implementation")
@@ -734,17 +738,11 @@ impl Default for ModelRegistry {
 }
 
 /// Global model registry instance
-static mut GLOBAL_REGISTRY: Option<ModelRegistry> = None;
-static REGISTRY_INIT: std::sync::Once = std::sync::Once::new();
+static GLOBAL_REGISTRY: std::sync::OnceLock<ModelRegistry> = std::sync::OnceLock::new();
 
 /// Get the global model registry instance
 pub fn global_registry() -> &'static ModelRegistry {
-    unsafe {
-        REGISTRY_INIT.call_once(|| {
-            GLOBAL_REGISTRY = Some(ModelRegistry::new());
-        });
-        GLOBAL_REGISTRY.as_ref().unwrap()
-    }
+    GLOBAL_REGISTRY.get_or_init(|| ModelRegistry::new())
 }
 
 /// Model configuration loader utilities
